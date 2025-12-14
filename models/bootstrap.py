@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.utils import resample
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score, confusion_matrix
 from copy import deepcopy
 from .classifiers import Classifier
 
@@ -114,6 +114,24 @@ class BootstrapAnalyzer:
                 'recall': recall_score(y_test, y_pred, average='weighted')
             }
 
+            # Calculate Sensitivity and Specificity (for binary classification)
+            if len(np.unique(y)) == 2:
+                try:
+                    cm = confusion_matrix(y_test, y_pred)
+                    if cm.shape == (2, 2):
+                        tn, fp, fn, tp = cm.ravel()
+                        # Sensitivity = TPR = TP / (TP + FN)
+                        metrics['sensitivity'] = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                        # Specificity = TNR = TN / (TN + FP)
+                        metrics['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+                except Exception:
+                    metrics['sensitivity'] = np.nan
+                    metrics['specificity'] = np.nan
+            else:
+                # For multi-class, use recall as sensitivity (not standard but provides a value)
+                metrics['sensitivity'] = metrics['recall']
+                metrics['specificity'] = np.nan
+
             if y_prob is not None and len(np.unique(y)) == 2:
                 try:
                     metrics['auc'] = roc_auc_score(y_test, y_prob)
@@ -148,4 +166,5 @@ class BootstrapAnalyzer:
                 'ci_upper_95': ci_upper
             })
 
-        return pd.DataFrame(summary).set_index('metric')
+        # Convert to dict format expected by ExperimentManager._get_metric()
+        return pd.DataFrame(summary).set_index('metric').to_dict('index')
