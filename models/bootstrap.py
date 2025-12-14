@@ -103,7 +103,8 @@ class BootstrapAnalyzer:
             y_pred = clf_iter.predict(X_test)
             try:
                 y_prob = clf_iter.predict_proba(X_test)[:, 1]
-            except:
+            except (AttributeError, IndexError, NotImplementedError):
+                # Some classifiers don't support predict_proba
                 y_prob = None
 
             # 4. Calculate Metrics

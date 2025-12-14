@@ -39,7 +39,8 @@ class InteractivePlotter:
                                 title=f"{feature} by {outcome_name}")
                 safe_feat = "".join([c for c in feature if c.isalnum() or c in ('_')]).strip()
                 fig.write_html(str(save_dir / f"{safe_feat}.html"))
-            except:
+            except (ValueError, KeyError, TypeError) as e:
+                # Skip features that can't be plotted (e.g., all NaN, wrong dtype)
                 pass
 
     def plot_statistical_ranking(self, stats_df):
@@ -93,7 +94,8 @@ class InteractivePlotter:
                 fpr, tpr, _ = roc_curve(y_true, score)
                 roc_auc = auc(fpr, tpr)
                 fig.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name=f'{name} (AUC={roc_auc:.2f})'))
-            except:
+            except (ValueError, IndexError, AttributeError) as e:
+                # Skip models with invalid predictions or incompatible format
                 continue
         fig.update_layout(title="ROC Comparison", xaxis_title="FPR", yaxis_title="TPR")
         fig.write_html(str(self.output_dir / filename))
