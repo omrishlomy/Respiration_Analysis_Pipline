@@ -38,9 +38,11 @@ class FeatureAggregator:
         agg_config = self.config.get('features', {}).get('aggregation', {})
 
         # Which aggregation functions to apply
+        # Default changed to 'mean' only to avoid feature explosion (26 features instead of 130)
+        # User can add more via config: features.aggregation.functions = ['mean', 'std', 'cv', etc.]
         self.aggregation_functions = agg_config.get(
             'functions',
-            ['mean', 'std', 'min', 'max', 'median']
+            ['mean']  # Changed from ['mean', 'std', 'min', 'max', 'median']
         )
 
         # Minimum number of windows required for aggregation

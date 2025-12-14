@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split
 from .classifiers import SVMClassifier
 from .evaluation import GridSearchTuner
 from .bootstrap import BootstrapAnalyzer
@@ -28,40 +29,56 @@ class ExperimentManager:
                     experiments[f'LOO: -{feature}'] = subset
 
         results_list = []
-        predictions = {}
+        test_predictions = {}  # Store test set predictions (not training data!)
 
         classes, counts = np.unique(y, return_counts=True)
         print(f"    🔍 DATA DEBUG: Total Samples: {len(y)} | Balance: {dict(zip(classes, counts))}")
 
-        n_folds = max(2, min(self.model_cfg['cv_folds'], min(counts)))
+        # Create a proper train/test split (80/20) to avoid overfitting
+        # Bootstrap will use training set only
+        test_size = min(0.2, 10 / len(y))  # At least 10 samples or 20%, whichever is smaller
+        X_indices = np.arange(len(y))
+        train_idx, test_idx = train_test_split(
+            X_indices,
+            test_size=test_size,
+            stratify=y,
+            random_state=42
+        )
+
+        y_train = y[train_idx]
+        y_test = y[test_idx]
+        print(f"    📊 Train/Test Split: {len(train_idx)} train, {len(test_idx)} test samples")
+
+        n_folds = max(2, min(self.model_cfg['cv_folds'], min(np.unique(y_train, return_counts=True)[1])))
 
         print(f"    Running {len(experiments)} model variants...")
 
         for exp_name, feature_subset in tqdm(experiments.items(), desc="Training"):
             try:
-                # 1. Subset Data
-                X_sub = X_df[feature_subset].values
+                # 1. Subset Data (TRAIN and TEST separately!)
+                X_train = X_df.iloc[train_idx][feature_subset].values
+                X_test = X_df.iloc[test_idx][feature_subset].values
 
-                # 2. Tune
+                # 2. Tune (on training data only)
                 clf = SVMClassifier()
                 tuner = GridSearchTuner(cv_folds=n_folds)
-                best_model, best_params = tuner.tune(clf, X_sub, y, self.model_cfg['tuning']['svm'])
+                best_model, best_params = tuner.tune(clf, X_train, y_train, self.model_cfg['tuning']['svm'])
 
-                # 3. Bootstrap Eval
+                # 3. Bootstrap Eval (on training data only)
                 bootstrapper = BootstrapAnalyzer(n_iterations=self.model_cfg['bootstrap_iterations'])
-                metrics = bootstrapper.evaluate(best_model, X_sub, y)
+                metrics = bootstrapper.evaluate(best_model, X_train, y_train)
 
                 # --- DEBUG: Print Keys First Time ---
                 if len(results_list) == 0:
                     print(f"    🔍 DEBUG Metrics Keys Found: {list(metrics.keys())}")
 
-                # 4. Final Train
-                best_model.train(X_sub, y)
-                y_prob = best_model.predict_proba(X_sub)
+                # 4. Final Train on ALL training data, predict on TEST set
+                best_model.train(X_train, y_train)
+                y_test_prob = best_model.predict_proba(X_test)
 
-                predictions[exp_name] = y_prob
+                test_predictions[exp_name] = y_test_prob
 
-                # Store results
+                # Store results (from bootstrap cross-validation on training set)
                 results_list.append({
                     'Experiment': exp_name,
                     'Dimension': len(feature_subset),
@@ -73,20 +90,29 @@ class ExperimentManager:
                     'Features_Used': ", ".join(feature_subset)
                 })
 
+                # Generate confusion matrix from TEST set predictions (not training!)
                 if plotter:
                     safe_name = "".join([c for c in exp_name if c.isalnum()]).strip()
-                    y_pred = (y_prob > 0.5).astype(int) if y_prob.ndim == 1 else np.argmax(y_prob, axis=1)
-                    plotter.plot_confusion_matrix(y, y_pred, title=f"CM: {exp_name}", filename=f"cm_{safe_name}.html")
+                    y_test_pred = (y_test_prob > 0.5).astype(int) if y_test_prob.ndim == 1 else np.argmax(y_test_prob, axis=1)
+                    plotter.plot_confusion_matrix(
+                        y_test, y_test_pred,
+                        title=f"CM (Test Set): {exp_name}",
+                        filename=f"cm_{safe_name}.html"
+                    )
 
             except Exception as e:
                 print(f"    ❌ Experiment '{exp_name}' failed: {e}")
                 import traceback
                 traceback.print_exc()
 
-        if plotter and predictions:
-            plotter.plot_comparison_roc(predictions, y, filename="ROC_Comparison_All_Experiments.html")
+        # Generate ROC curves from TEST set predictions (not training!)
+        if plotter and test_predictions:
+            plotter.plot_comparison_roc(
+                test_predictions, y_test,
+                filename="ROC_Comparison_All_Experiments_TestSet.html"
+            )
 
-        return pd.DataFrame(results_list), predictions
+        return pd.DataFrame(results_list), test_predictions
 
     def _get_metric(self, metrics, keys):
         """Helper to find a metric using multiple possible keys."""
