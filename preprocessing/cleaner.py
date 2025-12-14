@@ -21,7 +21,7 @@ import os
 # =============================================================================
 try:
     # 1. Try Absolute Import (Standard)
-    from respiratory_analysis.data.recording import RespiratoryRecording
+    from data.recording import RespiratoryRecording
 except ImportError:
     try:
         # 2. Try Relative Import (If running as module)

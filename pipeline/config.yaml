@@ -1,0 +1,101 @@
+# Respiratory Analysis Pipeline Configuration
+
+# ============================================================================
+# 1. DATA CONFIGURATION
+# ============================================================================
+data:
+  # Paths
+  data_dir: 'C:/Users/omris/OneDrive/Desktop/Sleeping Lab/DoC respiration data/downsampled'
+  labels_file: 'C:/Users/omris/OneDrive/Desktop/Sleeping Lab/DoC respiration data/respiratory_analysis_all_subjects.xlsx'
+  output_dir: 'C:/Users/omris/OneDrive/Desktop/Sleeping Lab/DoC respiration data/results_experiment_1'
+
+  # Columns Setup (Updated based on your debug output)
+  subject_id_column: "Name"
+
+  # Target Outcomes (Updated to match Excel headers exactly)
+  outcomes:
+    - "Recovery"
+    - "currentConsciousness"            # Replaced "MCS_vs_UWS"
+    - "Survival"
+
+  positive_class: 1                     # Target class value (e.g. 1)
+
+  # Loading parameters
+  data_key: 'data'
+  fs_key: 'fs'
+  default_sampling_rate: 6.0
+
+# ============================================================================
+# 2. PREPROCESSING
+# ============================================================================
+preprocessing:
+  cleaning:
+    remove_outliers: true
+    apply_filter: true
+    filter_type: 'bandpass'
+    lowcut: 0.05
+    highcut: 0.5
+
+  windowing:
+    window_size: 300       # 5 minutes
+    overlap: 60            # 1 minute overlap
+
+# ============================================================================
+# 3. FEATURE EXTRACTION
+# ============================================================================
+features:
+  peak_detection:
+    min_peak_distance_seconds: 2.0
+    min_peak_prominence: 0.01
+
+  aggregation:
+    functions: ['mean', 'std', 'cv']
+    min_windows: 1
+
+# ============================================================================
+# 4. ANALYSIS LAYER
+# ============================================================================
+analysis:
+  statistical:
+    test: 'mannwhitney'         # 'mannwhitney' or 'ttest'
+    alpha: 0.05                 # Significance threshold
+    correction: 'fdr_bh'        # 'fdr_bh' (Benjamini-Hochberg) or 'bonferroni'
+
+  feature_selection:
+    method: 'statistical'       # Select features based on p-value
+    n_features: 20              # Max features to select for modelling
+
+# ============================================================================
+# 5. MODELS LAYER
+# ============================================================================
+models:
+  # General Settings
+  cv_folds: 5                   # Cross-validation folds for tuning
+  bootstrap_iterations: 100     # Number of bootstrap resamples for CI
+
+  # Neural Network Architecture
+  neural_network:
+    hidden_layers: [100, 50]    # Two hidden layers
+    activation: 'relu'
+    max_iter: 500
+    solver: 'adam'
+
+  # Grid Search Spaces
+  tuning:
+    svm:
+      C: [0.1, 1, 10, 100]
+      kernel: ['rbf', 'linear']
+    random_forest:
+      n_estimators: [50, 100, 200]
+      max_depth: [null, 10, 20]
+
+# ============================================================================
+# 6. VISUALIZATION & EXPORT
+# ============================================================================
+visualization:
+  generate_plots: true
+  dashboard_filename: "DASHBOARD_SUMMARY.html"
+
+export:
+  filename: "FINAL_REPORT.xlsx"
+  include_hyperparameters: true
