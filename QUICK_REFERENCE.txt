@@ -1,0 +1,120 @@
+═══════════════════════════════════════════════════════════════════
+  RESPIRATORY ANALYSIS TOOLKIT - QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════
+
+📦 PACKAGE STRUCTURE (7 Layers)
+├── data/           Load .mat files & labels, export to Excel
+├── preprocessing/  Clean signals & create time windows  
+├── features/       Extract 25+ breathing parameters ⭐
+├── analysis/       Statistical tests & PCA/t-SNE
+├── models/         Train SVM, KNN, RF, XGBoost
+├── visualization/  Interactive & static plots
+└── pipeline/       Orchestrate everything via YAML config
+
+───────────────────────────────────────────────────────────────────
+📋 IMPLEMENTATION ORDER (4 Weeks)
+
+Week 1: DATA LAYER
+  ├─ recording.py         RespiratoryRecording class
+  ├─ loaders.py           MATDataLoader (your .mat files)
+  ├─ clinical_labels.py   ClinicalLabels (Excel)
+  └─ exporters.py         ExcelExporter
+
+Week 2: FEATURES LAYER ⭐ (MOST IMPORTANT)
+  ├─ preprocessing/cleaner.py    Signal cleaning
+  ├─ preprocessing/windowing.py  5-min blocks, 1-min overlap
+  ├─ extractors/breathing.py     PORT YOUR MATLAB CODE HERE!
+  ├─ collection.py               FeatureCollection
+  └─ aggregator.py               Block → Recording aggregation
+
+Week 3: ANALYSIS LAYER
+  ├─ statistical.py       T-tests, significance, FDR correction
+  └─ dimensionality.py    PCA, t-SNE
+
+Week 4: MODELS & INTEGRATION
+  ├─ models/*.py          Classifiers (SVM, KNN, RF, etc.)
+  ├─ visualization/*.py   Plotly/Matplotlib plots
+  └─ pipeline/*.py        Complete pipeline
+
+───────────────────────────────────────────────────────────────────
+🎯 CRITICAL FILES TO IMPLEMENT FIRST
+
+1. data/recording.py           ← Basic data structure
+2. data/loaders.py             ← Load your .mat files
+3. data/clinical_labels.py     ← Load Excel labels
+4. features/extractors/breathing.py  ← YOUR MATLAB ALGORITHMS ⭐
+5. features/aggregator.py      ← Combine blocks
+6. pipeline/__init__.py        ← Tie it all together
+
+───────────────────────────────────────────────────────────────────
+💻 BASIC USAGE (After Implementation)
+
+# Full Pipeline
+from respiratory_analysis import AnalysisPipeline, AnalysisConfig
+config = AnalysisConfig.from_yaml('config.yaml')
+pipeline = AnalysisPipeline(config)
+results = pipeline.run()
+
+# Custom Analysis
+from respiratory_analysis.data import MATDataLoader
+from respiratory_analysis.features import BreathingParameterExtractor
+
+loader = MATDataLoader()
+recording = loader.load('subject_001.mat')
+
+extractor = BreathingParameterExtractor()
+features = extractor.extract(signal, sampling_rate)
+# → {'respiratory_rate_mean': 15.2, 'breath_amplitude_std': 0.8, ...}
+
+───────────────────────────────────────────────────────────────────
+📚 DOCUMENTATION FILES
+
+README.md                    ← Complete API documentation
+IMPLEMENTATION_GUIDE.md      ← Step-by-step 4-week plan
+PROJECT_SUMMARY.md           ← This entire project explained
+examples/config_template.yaml ← Configuration example
+examples/01_basic_analysis.py ← Simple usage
+examples/02_custom_analysis.py ← Advanced usage
+
+───────────────────────────────────────────────────────────────────
+🔧 SETUP
+
+1. Extract archive: tar -xzf respiratory_analysis_complete.tar.gz
+2. Install deps:   pip install -r requirements.txt
+3. Start coding:   Implement data layer first!
+
+───────────────────────────────────────────────────────────────────
+✨ KEY DESIGN BENEFITS
+
+✓ Extensible:      Add new features without breaking code
+✓ Modular:         Use components independently
+✓ Config-driven:   YAML controls everything
+✓ Testable:        Each class can be unit tested
+✓ Professional:    Industry-standard architecture
+✓ MATLAB-friendly: Matches your existing workflow
+
+───────────────────────────────────────────────────────────────────
+🎓 YOUR MATLAB → PYTHON MAP
+
+MATLAB Script             → Python Class
+───────────────────────────────────────────────────────────────
+Load .mat files           → MATDataLoader
+Split into 5-min blocks   → WindowGenerator  
+Extract 25 parameters ⭐   → BreathingParameterExtractor
+Aggregate features        → FeatureAggregator
+Statistical tests         → StatisticalAnalyzer
+Train SVM/KNN             → SVMClassifier, KNNClassifier
+Generate plots            → PlotlyPlotter
+Export to Excel           → ExcelExporter
+
+───────────────────────────────────────────────────────────────────
+📊 WHAT YOU GET
+
+26  Python files with complete APIs
+45+ Classes organized into 7 layers
+200+ Methods with full docstrings
+0   Lines of implementation (ready for you!)
+
+═══════════════════════════════════════════════════════════════════
+  NEXT STEP: Read IMPLEMENTATION_GUIDE.md and start coding!
+═══════════════════════════════════════════════════════════════════
