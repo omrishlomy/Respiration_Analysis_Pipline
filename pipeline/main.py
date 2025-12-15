@@ -93,13 +93,17 @@ def main():
     all_subject_features = []
     feature_matrices = {}
 
-    for rec in tqdm(recordings, desc="Extracting"):
+    # Only visualize first 10 recordings to save time (can be changed in config)
+    viz_limit = config.get('visualization', {}).get('max_signal_plots', 10)
+
+    for idx, rec in enumerate(tqdm(recordings, desc="Extracting")):
         try:
             rec_clean = cleaner.clean(rec)
 
-            # Extract breath peaks for visualization
-            _, breath_peaks = extractor.extract_with_details(rec_clean.data, rec_clean.sampling_rate)
-            global_plotter.plot_signal_traces(rec.data, rec_clean.data, rec.sampling_rate, rec.subject_id, breath_peaks)
+            # Extract breath peaks for visualization (only for first N recordings)
+            if idx < viz_limit:
+                _, breath_peaks = extractor.extract_with_details(rec_clean.data, rec_clean.sampling_rate)
+                global_plotter.plot_signal_traces(rec.data, rec_clean.data, rec.sampling_rate, rec.subject_id, breath_peaks)
 
             try:
                 windows = win_gen.generate_windows(rec_clean)
