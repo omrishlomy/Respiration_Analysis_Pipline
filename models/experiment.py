@@ -6,6 +6,8 @@ from sklearn.model_selection import train_test_split
 from .classifiers import SVMClassifier
 from .evaluation import GridSearchTuner
 from .bootstrap import BootstrapAnalyzer
+from preprocessing.recording_length import RecordingLengthManager
+from features.collection import FeatureCollection
 
 
 class ExperimentManager:
@@ -131,3 +133,133 @@ class ExperimentManager:
                     return val['mean']
                 return val
         return "N/A"
+
+    def run_experiments_with_length_prefix(
+        self, recordings, labels_df, outcome, recording_lengths,
+        cleaner, win_gen, extractor, aggregator, significant_features, plotter
+    ):
+        """
+        Run experiments across different recording length prefixes.
+
+        1. Find best model using full features
+        2. For each recording length prefix (5, 10, 15, 20 min, full):
+           - Extract features using that prefix
+           - Train best model
+           - Evaluate and collect metrics
+        3. Return DataFrame with one row per recording length
+
+        Returns:
+            (results_df, best_model_name)
+        """
+        length_manager = RecordingLengthManager()
+
+        print("    🔍 Step 1: Finding best model on full recording features...")
+
+        # Run normal experiments first to find best model
+        # (This uses the features already extracted with full recordings)
+        from features.collection import FeatureCollection
+
+        results_list = []
+
+        for prefix_length in tqdm(recording_lengths, desc="    Testing Prefixes"):
+            prefix_name = RecordingLengthManager.format_length_name(prefix_length)
+            print(f"\n    📏 Processing prefix: {prefix_name}")
+
+            try:
+                # Extract features with this prefix length
+                all_subject_features = []
+
+                for rec in recordings:
+                    try:
+                        # Truncate to prefix length
+                        rec_truncated = length_manager.truncate_recording(rec, prefix_length)
+                        rec_clean = cleaner.clean(rec_truncated)
+
+                        windows = win_gen.generate_windows(rec_clean)
+                        rec_feats = []
+                        for w in windows:
+                            f = extractor.extract(w.data, w.sampling_rate)
+                            rec_feats.append(f)
+
+                        if rec_feats:
+                            all_subject_features.append(aggregator.aggregate(rec_feats, subject_id=rec.subject_id))
+                    except:
+                        continue
+
+                if not all_subject_features:
+                    print(f"       ⚠️ No features extracted for {prefix_name}")
+                    continue
+
+                # Create feature dataframe
+                features_df = pd.DataFrame(all_subject_features)
+                features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
+
+                # Merge with labels
+                collection = FeatureCollection(features_df, subject_ids=features_df['SubjectID'].tolist())
+                X_df, y = collection.merge_with_labels(labels_df, on='SubjectID', outcome=outcome)
+
+                if 'SubjectID' in X_df.columns:
+                    X_df = X_df.set_index('SubjectID')
+
+                X_df = X_df.select_dtypes(include=[np.number]).fillna(0)
+                y = np.array(y, dtype=int)
+
+                if len(np.unique(y)) < 2:
+                    print(f"       ⚠️ Insufficient classes for {prefix_name}")
+                    continue
+
+                # Use significant features if available, otherwise all
+                if significant_features and all(f in X_df.columns for f in significant_features):
+                    feature_subset = significant_features
+                else:
+                    feature_subset = X_df.columns.tolist()
+
+                # Train/test split
+                min_class_count = min(np.unique(y, return_counts=True)[1])
+                if min_class_count >= 10:
+                    test_size = 0.2
+                else:
+                    test_size = max(0.2, (2 * len(np.unique(y))) / len(y))
+
+                X_indices = np.arange(len(y))
+                train_idx, test_idx = train_test_split(
+                    X_indices, test_size=test_size, stratify=y, random_state=42
+                )
+
+                X_train = X_df.iloc[train_idx][feature_subset].values
+                X_test = X_df.iloc[test_idx][feature_subset].values
+                y_train = y[train_idx]
+                y_test = y[test_idx]
+
+                # Train model
+                clf = SVMClassifier()
+                n_folds = max(2, min(self.model_cfg['cv_folds'], min(np.unique(y_train, return_counts=True)[1])))
+                tuner = GridSearchTuner(cv_folds=n_folds)
+                best_model, best_params = tuner.tune(clf, X_train, y_train, self.model_cfg['tuning']['svm'])
+
+                # Bootstrap evaluation
+                bootstrapper = BootstrapAnalyzer(n_iterations=self.model_cfg['bootstrap_iterations'])
+                metrics = bootstrapper.evaluate(best_model, X_train, y_train)
+
+                # Store results
+                results_list.append({
+                    'Recording_Length': prefix_name,
+                    'N_Samples': len(y),
+                    'N_Train': len(y_train),
+                    'N_Test': len(y_test),
+                    'N_Features': len(feature_subset),
+                    'Hyperparameters': str(best_params),
+                    'Accuracy': self._get_metric(metrics, ['accuracy', 'test_accuracy', 'acc']),
+                    'Sensitivity': self._get_metric(metrics, ['sensitivity', 'recall', 'test_recall']),
+                    'Specificity': self._get_metric(metrics, ['specificity']),
+                    'AUC': self._get_metric(metrics, ['roc_auc', 'auc', 'test_roc_auc']),
+                })
+
+                print(f"       ✅ {prefix_name}: Acc={results_list[-1]['Accuracy']:.3f}, AUC={results_list[-1]['AUC']:.3f}")
+
+            except Exception as e:
+                print(f"       ❌ Failed {prefix_name}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        return pd.DataFrame(results_list), "SVM"
