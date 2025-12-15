@@ -147,24 +147,20 @@ def main():
 
     if skip_visualization:
         print(f"    ℹ️  Signal plots already exist ({len(list(signals_dir.glob('*.html')))} plots found), skipping visualization...")
-    elif not force_regenerate:
-        # Only visualize first N recordings to save time (can be changed in config)
-        viz_limit = config.get('visualization', {}).get('max_signal_plots', 10)
-        print(f"    Creating breathmetrics plots for first {viz_limit} recordings...")
+    else:
+        print(f"    Creating breathmetrics plots for ALL recordings (5 minutes each)...")
 
-    # Set viz_limit even if skipping, to avoid errors
-    viz_limit = config.get('visualization', {}).get('max_signal_plots', 10)
     viz_created_count = 0
 
     for idx, rec in enumerate(tqdm(recordings, desc="Extracting")):
         try:
             rec_clean = cleaner.clean(rec)
 
-            # Extract breath peaks for visualization (only for first N recordings, and only if not already done)
-            if not skip_visualization and idx < viz_limit:
+            # Extract breath peaks for visualization (ALL recordings, 5 minutes each)
+            if not skip_visualization:
                 try:
-                    # Only process first 2 minutes for visualization (much faster!)
-                    viz_duration_sec = 120  # 2 minutes
+                    # Process first 5 minutes for visualization
+                    viz_duration_sec = 300  # 5 minutes
                     viz_samples = int(viz_duration_sec * rec_clean.sampling_rate)
 
                     if len(rec_clean.data) > viz_samples:
