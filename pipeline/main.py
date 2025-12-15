@@ -51,7 +51,32 @@ def main():
         __file__).resolve().parent.parent.parent / data_cfg["output_dir"]
     base_out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get recording lengths for prefix experiments
+    # Initialize plotter
+    global_plotter = InteractivePlotter(output_dir=base_out_dir / "general_plots")
+
+    # --- PHASE 1: DATA ---
+    print("\n[PHASE 1] Data Loading & Extraction")
+
+    try:
+        labels_df = pd.read_excel(data_cfg['labels_file'], engine='openpyxl')
+        id_col = data_cfg.get("subject_id_column", "SubjectID")
+        if id_col not in labels_df.columns:
+            for col in labels_df.columns:
+                if col.strip() == id_col.strip():
+                    labels_df = labels_df.rename(columns={col: "SubjectID"})
+                    break
+        else:
+            labels_df = labels_df.rename(columns={id_col: "SubjectID"})
+        labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip()
+    except Exception as e:
+        return print(f"❌ LABEL ERROR: {e}")
+
+    # Load recordings once (keep them for prefix experiments)
+    loader = MATDataLoader(default_sampling_rate=data_cfg["default_sampling_rate"])
+    recordings = loader.load_batch(str(data_cfg["data_dir"]))
+    if not recordings: return print("❌ No recordings found.")
+
+    # Get recording lengths for prefix experiments and extend dynamically
     recording_lengths = data_cfg.get('recording_lengths', [None])
     if recording_lengths is None:
         recording_lengths = [None]
@@ -98,31 +123,6 @@ def main():
         recording_lengths = extended_prefixes
 
     print(f"\n📏 Recording Length Prefixes: {[RecordingLengthManager.format_length_name(l) for l in recording_lengths]}")
-
-    # Initialize plotter
-    global_plotter = InteractivePlotter(output_dir=base_out_dir / "general_plots")
-
-    # --- PHASE 1: DATA ---
-    print("\n[PHASE 1] Data Loading & Extraction")
-
-    try:
-        labels_df = pd.read_excel(data_cfg['labels_file'], engine='openpyxl')
-        id_col = data_cfg.get("subject_id_column", "SubjectID")
-        if id_col not in labels_df.columns:
-            for col in labels_df.columns:
-                if col.strip() == id_col.strip():
-                    labels_df = labels_df.rename(columns={col: "SubjectID"})
-                    break
-        else:
-            labels_df = labels_df.rename(columns={id_col: "SubjectID"})
-        labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip()
-    except Exception as e:
-        return print(f"❌ LABEL ERROR: {e}")
-
-    # Load recordings once (keep them for prefix experiments)
-    loader = MATDataLoader(default_sampling_rate=data_cfg["default_sampling_rate"])
-    recordings = loader.load_batch(str(data_cfg["data_dir"]))
-    if not recordings: return print("❌ No recordings found.")
 
     # Initialize processing components
     cleaner = SignalCleaner(config)
