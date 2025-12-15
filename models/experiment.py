@@ -451,6 +451,7 @@ class ExperimentManager:
             y_train, y_test = y[train_idx], y[test_idx]
 
             # Create Neural Network classifier
+            # Note: random_state=42 is set internally in NeuralNetworkClassifier
             nn_clf = NeuralNetworkClassifier(
                 hidden_layer_sizes=(100, 50),  # 2 hidden layers
                 activation='relu',
@@ -458,8 +459,7 @@ class ExperimentManager:
                 alpha=0.0001,
                 learning_rate_init=0.001,
                 max_iter=500,
-                early_stopping=True,
-                random_state=42
+                early_stopping=True
             )
 
             # Train on training set
