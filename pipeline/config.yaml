@@ -80,6 +80,7 @@ models:
 
   # Neural Network Architecture
   neural_network:
+    enabled: false              # Enable Neural Network training (default: false due to small dataset)
     hidden_layers: [100, 50]    # Two hidden layers
     activation: 'relu'
     max_iter: 500

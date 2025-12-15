@@ -365,11 +365,17 @@ def main():
                 pipeline_context, X_df, y, sig_feats, recording_lengths
             )
 
-            # Run Neural Network experiments
-            print(f"    Running Neural Network models across {len(recording_lengths)} prefixes...")
-            nn_results_df = exp_manager.run_neural_network_experiments_with_length_prefix(
-                pipeline_context, X_df, y, sig_feats, recording_lengths
-            )
+            # Run Neural Network experiments (if enabled)
+            nn_results_df = None
+            nn_enabled = config.get('models', {}).get('neural_network', {}).get('enabled', False)
+
+            if nn_enabled:
+                print(f"    Running Neural Network models across {len(recording_lengths)} prefixes...")
+                nn_results_df = exp_manager.run_neural_network_experiments_with_length_prefix(
+                    pipeline_context, X_df, y, sig_feats, recording_lengths
+                )
+            else:
+                print(f"    ⚠️  Neural Network training is DISABLED (set models.neural_network.enabled: true to enable)")
 
             # 6. Export - Multiple Sheets
             exporter = ExcelExporter(filepath=str(out_dir / f"REPORT_{outcome}.xlsx"))
@@ -377,8 +383,8 @@ def main():
             # Add SVM results
             exporter.add_sheet("SVM_Results_By_Prefix", svm_results_df)
 
-            # Add Neural Network results
-            if nn_results_df is not None and not nn_results_df.empty:
+            # Add Neural Network results (only if enabled and generated)
+            if nn_enabled and nn_results_df is not None and not nn_results_df.empty:
                 exporter.add_sheet("NeuralNetwork_Results", nn_results_df)
 
             # Add PCA results if available

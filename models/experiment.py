@@ -9,6 +9,7 @@ from .evaluation import GridSearchTuner
 from .bootstrap import BootstrapAnalyzer
 from preprocessing.recording_length import RecordingLengthManager
 from features.collection import FeatureCollection
+from analysis.statistical import StatisticalAnalyzer
 
 
 class ExperimentManager:
@@ -304,19 +305,28 @@ class ExperimentManager:
     def run_neural_network_experiments_with_length_prefix(self, pipeline_context, X_df, y, significant_features, recording_lengths):
         """
         Run Neural Network experiments across recording length prefixes.
-        Parallel to SVM experiments but uses MLPClassifier.
+
+        IMPORTANT: To avoid data leakage, this method:
+        1. Extracts features from ALL recordings (keeping global feature extraction as requested)
+        2. Splits data into train/test FIRST (subject-level split)
+        3. Performs statistical feature selection on TRAINING data only
+        4. Trains NN on training data with selected features
+        5. Evaluates on held-out test data
+
+        This prevents the "peeking" problem where feature selection uses test data.
 
         Args:
             pipeline_context: Dict with recordings, cleaner, extractor, etc.
-            X_df: Full feature DataFrame
-            y: Labels
-            significant_features: List of significant feature names
+            X_df: Full feature DataFrame (not used - kept for compatibility)
+            y: Labels (not used - kept for compatibility)
+            significant_features: List of significant feature names (not used - will compute on train data)
             recording_lengths: List of recording length prefixes to test
 
         Returns:
             DataFrame with Neural Network results
         """
-        print(f"\n[MODELS] Training Neural Networks")
+        print(f"\n[MODELS] Training Neural Networks (with proper train/test split)")
+        print(f"    ⚠️  Feature selection will be done on TRAINING data only to avoid leakage")
         all_results = []
 
         # Extract pipeline components
@@ -327,6 +337,11 @@ class ExperimentManager:
         win_gen = pipeline_context['win_gen']
         extractor = pipeline_context['extractor']
         aggregator = pipeline_context['aggregator']
+
+        # Get statistical test configuration
+        stats_config = self.config.get('analysis', {}).get('statistical', {})
+        test_method = stats_config.get('test', 'mannwhitney')
+        correction_method = stats_config.get('correction', 'fdr_bh')
 
         for prefix_length in tqdm(recording_lengths, desc="    Testing Prefixes (NN)"):
             try:
@@ -339,7 +354,7 @@ class ExperimentManager:
 
                 prefix_name = RecordingLengthManager.format_length_name(prefix_length)
 
-                # Extract features for this prefix
+                # Extract features for this prefix (from ALL recordings as requested)
                 all_subject_features = []
                 for rec in truncated_recordings:
                     try:
@@ -373,6 +388,9 @@ class ExperimentManager:
                     labels_df, on='SubjectID', outcome=outcome
                 )
 
+                # Keep subject IDs before converting to numeric-only
+                subject_ids = X_df_prefix['SubjectID'] if 'SubjectID' in X_df_prefix.columns else X_df_prefix.index
+
                 if 'SubjectID' in X_df_prefix.columns:
                     X_df_prefix = X_df_prefix.set_index('SubjectID')
 
@@ -383,23 +401,56 @@ class ExperimentManager:
                     print(f"       ⚠️ Insufficient classes for {prefix_name}")
                     continue
 
-                # Build experiment variants (All Features, Significant, LOO)
-                all_features = X_df_prefix.columns.tolist()
+                # STEP 1: Split data into train/test FIRST (subject-level)
+                min_class_count = min(np.unique(y_prefix, return_counts=True)[1])
+                if min_class_count < 2:
+                    continue
+
+                test_size = 0.2 if min_class_count >= 10 else max(0.2, (2 * len(np.unique(y_prefix))) / len(y_prefix))
+
+                train_idx, test_idx = train_test_split(
+                    np.arange(len(y_prefix)),
+                    test_size=test_size,
+                    stratify=y_prefix,
+                    random_state=42
+                )
+
+                # Split features and labels
+                X_train_full = X_df_prefix.iloc[train_idx]
+                X_test_full = X_df_prefix.iloc[test_idx]
+                y_train = y_prefix[train_idx]
+                y_test = y_prefix[test_idx]
+
+                # STEP 2: Perform statistical feature selection on TRAINING data only
+                stats_analyzer = StatisticalAnalyzer(test=test_method, correction_method=correction_method)
+                stats_df_train = stats_analyzer.compare_groups(
+                    X_train_full, y_train,
+                    outcome_name=outcome,
+                    feature_names=X_train_full.columns.tolist()
+                )
+
+                # Extract significant features from training data
+                feat_col = 'feature_name' if 'feature_name' in stats_df_train.columns else 'feature'
+                significant_features_train = stats_df_train[stats_df_train['significant'] == True][feat_col].tolist() if feat_col in stats_df_train.columns else []
+
+                # STEP 3: Build experiment variants
+                all_features = X_train_full.columns.tolist()
                 experiments = {'All Features': all_features}
 
-                if significant_features and all(f in X_df_prefix.columns for f in significant_features):
-                    experiments['Significant Features'] = significant_features
+                if significant_features_train:
+                    experiments['Significant Features (Train)'] = significant_features_train
 
                     # Leave-One-Out experiments for each significant feature
-                    if len(significant_features) > 1:
-                        for feature in significant_features:
-                            subset = [f for f in significant_features if f != feature]
+                    if len(significant_features_train) > 1:
+                        for feature in significant_features_train:
+                            subset = [f for f in significant_features_train if f != feature]
                             experiments[f'LOO: -{feature}'] = subset
 
-                # Train each experiment variant
+                # STEP 4: Train and evaluate each experiment variant
                 for exp_name, feature_subset in experiments.items():
-                    metrics = self._train_and_evaluate_nn_prefix(
-                        X_df_prefix, y_prefix, feature_subset, prefix_name, exp_name
+                    metrics = self._train_and_evaluate_nn_no_leakage(
+                        X_train_full, X_test_full, y_train, y_test,
+                        feature_subset, prefix_name, exp_name
                     )
                     if metrics:
                         all_results.append(metrics)
@@ -502,6 +553,90 @@ class ExperimentManager:
                 'Specificity': specificity,
                 'AUC': auc,
             }
+
+        except Exception as e:
+            print(f"       ❌ NN training failed for {prefix_name} - {experiment_name}: {e}")
+            return None
+
+    def _train_and_evaluate_nn_no_leakage(self, X_train_df, X_test_df, y_train, y_test, feature_subset, prefix_name, experiment_name):
+        """
+        Train and evaluate Neural Network with pre-split train/test data (NO LEAKAGE).
+
+        This method receives data that has ALREADY been split, ensuring that
+        feature selection was performed only on training data.
+
+        Args:
+            X_train_df: Training features DataFrame
+            X_test_df: Test features DataFrame
+            y_train: Training labels
+            y_test: Test labels
+            feature_subset: List of features to use
+            prefix_name: Name of recording length prefix (e.g., "10min")
+            experiment_name: Name of experiment variant (e.g., "All Features", "Significant Features (Train)")
+
+        Returns:
+            Dict with metrics, or None if training failed
+        """
+        try:
+            # Extract feature values
+            X_train = X_train_df[feature_subset].values
+            X_test = X_test_df[feature_subset].values
+
+            # Create Neural Network classifier
+            # Note: random_state=42 is set internally in NeuralNetworkClassifier
+            nn_clf = NeuralNetworkClassifier(
+                hidden_layer_sizes=(100, 50),  # 2 hidden layers
+                activation='relu',
+                solver='adam',
+                alpha=0.0001,
+                learning_rate_init=0.001,
+                max_iter=500,
+                early_stopping=True
+            )
+
+            # Train on training set
+            nn_clf.train(X_train, y_train, feature_names=feature_subset)
+
+            # Evaluate on test set
+            y_pred = nn_clf.predict(X_test)
+            y_prob = nn_clf.predict_proba(X_test)
+
+            # Calculate metrics
+            accuracy = accuracy_score(y_test, y_pred)
+
+            # Sensitivity (recall for positive class)
+            sensitivity = recall_score(y_test, y_pred, average='binary', pos_label=1)
+
+            # Specificity (recall for negative class)
+            cm = confusion_matrix(y_test, y_pred)
+            if cm.shape[0] == 2:
+                tn, fp, fn, tp = cm.ravel()
+                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+            else:
+                specificity = 0
+
+            # AUC
+            if y_prob.shape[1] == 2:
+                auc = roc_auc_score(y_test, y_prob[:, 1])
+            else:
+                auc = 0
+
+            result = {
+                'Recording_Length': prefix_name,
+                'Experiment': experiment_name,
+                'N_Samples': len(y_train) + len(y_test),
+                'N_Train': len(y_train),
+                'N_Test': len(y_test),
+                'N_Features': len(feature_subset),
+                'Architecture': '(100,50)',  # Hidden layer sizes
+                'Accuracy': accuracy,
+                'Sensitivity': sensitivity,
+                'Specificity': specificity,
+                'AUC': auc,
+            }
+
+            print(f"       ✅ {prefix_name} - {experiment_name}: Acc={accuracy:.3f}, N_Train={len(y_train)}, N_Test={len(y_test)}")
+            return result
 
         except Exception as e:
             print(f"       ❌ NN training failed for {prefix_name} - {experiment_name}: {e}")
