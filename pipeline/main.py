@@ -119,8 +119,19 @@ def main():
 
             # Extract breath peaks for visualization (only for first N recordings, and only if not already done)
             if not skip_visualization and idx < viz_limit:
-                _, breath_peaks = extractor.extract_with_details(rec_clean.data, rec_clean.sampling_rate)
-                global_plotter.plot_signal_traces(rec.data, rec_clean.data, rec.sampling_rate, rec.subject_id, breath_peaks)
+                # Only process first 2 minutes for visualization (much faster!)
+                viz_duration_sec = 120  # 2 minutes
+                viz_samples = int(viz_duration_sec * rec_clean.sampling_rate)
+
+                if len(rec_clean.data) > viz_samples:
+                    rec_clean_viz = rec_clean.data[:viz_samples]
+                    rec_raw_viz = rec.data[:viz_samples]
+                else:
+                    rec_clean_viz = rec_clean.data
+                    rec_raw_viz = rec.data
+
+                _, breath_peaks = extractor.extract_with_details(rec_clean_viz, rec_clean.sampling_rate)
+                global_plotter.plot_signal_traces(rec_raw_viz, rec_clean_viz, rec.sampling_rate, rec.subject_id, breath_peaks)
 
             try:
                 windows = win_gen.generate_windows(rec_clean)
