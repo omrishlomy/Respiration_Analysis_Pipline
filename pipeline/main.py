@@ -283,6 +283,21 @@ def main():
                         X_df, labels=y, subject_ids=X_df.index.tolist()
                     )
 
+                    # Get feature loadings (which original features contribute to each PC)
+                    loadings_df = pca_2d.get_loadings()
+                    top_features_pc1 = loadings_df['PC1'].abs().sort_values(ascending=False).head(10)
+                    top_features_pc2 = loadings_df['PC2'].abs().sort_values(ascending=False).head(10)
+
+                    # Print top contributing features for interpretation
+                    print(f"\n    🔍 Top Features Contributing to PC1 ({cumulative_var[0]*100:.1f}% variance):")
+                    for i, (feat, loading) in enumerate(zip(top_features_pc1.index, loadings_df.loc[top_features_pc1.index, 'PC1'].values), 1):
+                        print(f"       {i}. {feat}: {loading:+.3f}")
+
+                    print(f"\n    🔍 Top Features Contributing to PC2 (additional {explained_var[1]*100:.1f}% variance):")
+                    for i, (feat, loading) in enumerate(zip(top_features_pc2.index, loadings_df.loc[top_features_pc2.index, 'PC2'].values), 1):
+                        print(f"       {i}. {feat}: {loading:+.3f}")
+                    print()  # Empty line for readability
+
                     # Plot 1: PCA scatter plot (PC1 vs PC2)
                     plotter.plot_pca_scatter(pca_viz_df, outcome, explained_var[:2])
 
@@ -291,9 +306,6 @@ def main():
                     plotter.plot_pca_variance(variance_df)
 
                     # Plot 3: Feature loadings (top contributors to PC1 and PC2)
-                    loadings_df = pca_2d.get_loadings()
-                    top_features_pc1 = loadings_df['PC1'].abs().sort_values(ascending=False).head(10)
-                    top_features_pc2 = loadings_df['PC2'].abs().sort_values(ascending=False).head(10)
                     plotter.plot_pca_loadings(loadings_df, top_features_pc1.index.tolist(), top_features_pc2.index.tolist())
 
                     # Prepare PCA results for Excel export
@@ -303,17 +315,28 @@ def main():
                         'Cumulative_Variance': cumulative_var
                     })
 
+                    # Add top contributing features summary to Excel
+                    top_contributors = pd.DataFrame({
+                        'PC1_Feature': top_features_pc1.index.tolist(),
+                        'PC1_Loading': loadings_df.loc[top_features_pc1.index, 'PC1'].values,
+                        'PC2_Feature': top_features_pc2.index.tolist(),
+                        'PC2_Loading': loadings_df.loc[top_features_pc2.index, 'PC2'].values
+                    })
+
                     # Store for later export
                     pca_loadings_export = loadings_df.copy()
+                    pca_top_contributors = top_contributors
 
                 except Exception as e:
                     print(f"    ⚠️  PCA analysis failed: {e}")
                     pca_results = None
                     pca_loadings_export = None
+                    pca_top_contributors = None
             else:
                 print(f"    ⚠️  Not enough components for PCA (need at least 2, have {n_components_full})")
                 pca_results = None
                 pca_loadings_export = None
+                pca_top_contributors = None
 
             # 4. Save Feature Matrices (in dedicated directory)
             feature_matrix_plotter = InteractivePlotter(output_dir=out_dir / "feature_matrices")
@@ -361,8 +384,10 @@ def main():
             # Add PCA results if available
             if pca_results is not None:
                 exporter.add_sheet("PCA_Variance_Analysis", pca_results)
+            if pca_top_contributors is not None:
+                exporter.add_sheet("PCA_Top_Contributors", pca_top_contributors)
             if pca_loadings_export is not None:
-                exporter.add_sheet("PCA_Feature_Loadings", pca_loadings_export)
+                exporter.add_sheet("PCA_All_Feature_Loadings", pca_loadings_export)
 
             # Add statistical results
             exporter.add_statistical_results_sheet(stats_df)
