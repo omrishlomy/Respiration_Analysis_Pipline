@@ -55,6 +55,48 @@ def main():
     recording_lengths = data_cfg.get('recording_lengths', [None])
     if recording_lengths is None:
         recording_lengths = [None]
+
+    # Calculate the minimum recording duration across all recordings to extend prefix list
+    length_manager = RecordingLengthManager()
+    recording_durations = []
+    for rec in recordings:
+        duration_min = length_manager.get_recording_duration_minutes(rec)
+        recording_durations.append(duration_min)
+
+    if recording_durations:
+        min_recording_length = min(recording_durations)
+        max_recording_length = max(recording_durations)
+        print(f"    Recording durations: min={min_recording_length:.1f}min, max={max_recording_length:.1f}min")
+
+        # Extend prefix list to include steps up to the minimum recording length
+        # This ensures all recordings have data for all prefixes
+        extended_prefixes = []
+        for prefix in recording_lengths:
+            if prefix is None:
+                # Keep None to represent full recording
+                continue
+            extended_prefixes.append(prefix)
+
+        # Add 5-minute increments from 20 up to the minimum recording length
+        if extended_prefixes:
+            max_configured_prefix = max([p for p in extended_prefixes if p is not None])
+            current_prefix = max_configured_prefix + 5
+            while current_prefix < min_recording_length:
+                extended_prefixes.append(current_prefix)
+                current_prefix += 5
+
+        # Add the minimum recording length as the final numeric prefix
+        # (this ensures we test the maximum usable length before "full")
+        if min_recording_length > 5:
+            # Round to nearest integer for cleaner display
+            min_length_rounded = int(min_recording_length)
+            if min_length_rounded not in extended_prefixes:
+                extended_prefixes.append(min_length_rounded)
+
+        # Finally add None for full recording length
+        extended_prefixes.append(None)
+        recording_lengths = extended_prefixes
+
     print(f"\n📏 Recording Length Prefixes: {[RecordingLengthManager.format_length_name(l) for l in recording_lengths]}")
 
     # Initialize plotter
@@ -112,6 +154,7 @@ def main():
 
     # Set viz_limit even if skipping, to avoid errors
     viz_limit = config.get('visualization', {}).get('max_signal_plots', 10)
+    viz_created_count = 0
 
     for idx, rec in enumerate(tqdm(recordings, desc="Extracting")):
         try:
@@ -119,19 +162,23 @@ def main():
 
             # Extract breath peaks for visualization (only for first N recordings, and only if not already done)
             if not skip_visualization and idx < viz_limit:
-                # Only process first 2 minutes for visualization (much faster!)
-                viz_duration_sec = 120  # 2 minutes
-                viz_samples = int(viz_duration_sec * rec_clean.sampling_rate)
+                try:
+                    # Only process first 2 minutes for visualization (much faster!)
+                    viz_duration_sec = 120  # 2 minutes
+                    viz_samples = int(viz_duration_sec * rec_clean.sampling_rate)
 
-                if len(rec_clean.data) > viz_samples:
-                    rec_clean_viz = rec_clean.data[:viz_samples]
-                    rec_raw_viz = rec.data[:viz_samples]
-                else:
-                    rec_clean_viz = rec_clean.data
-                    rec_raw_viz = rec.data
+                    if len(rec_clean.data) > viz_samples:
+                        rec_clean_viz = rec_clean.data[:viz_samples]
+                        rec_raw_viz = rec.data[:viz_samples]
+                    else:
+                        rec_clean_viz = rec_clean.data
+                        rec_raw_viz = rec.data
 
-                _, breath_peaks = extractor.extract_with_details(rec_clean_viz, rec_clean.sampling_rate)
-                global_plotter.plot_signal_traces(rec_raw_viz, rec_clean_viz, rec.sampling_rate, rec.subject_id, breath_peaks)
+                    _, breath_peaks = extractor.extract_with_details(rec_clean_viz, rec_clean.sampling_rate)
+                    global_plotter.plot_signal_traces(rec_raw_viz, rec_clean_viz, rec.sampling_rate, rec.subject_id, breath_peaks)
+                    viz_created_count += 1
+                except Exception as e:
+                    print(f"    ⚠️  Visualization failed for {rec.subject_id}: {e}")
 
             try:
                 windows = win_gen.generate_windows(rec_clean)
@@ -153,6 +200,9 @@ def main():
 
         except Exception:
             pass
+
+    if not skip_visualization and viz_created_count > 0:
+        print(f"    ✅ Created {viz_created_count} signal visualizations")
 
     if not all_subject_features: return print("❌ No features extracted.")
     master_features_df = pd.DataFrame(all_subject_features)

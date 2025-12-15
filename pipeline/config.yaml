@@ -54,7 +54,7 @@ features:
     min_peak_prominence: 0.01
 
   aggregation:
-    functions: ['mean', 'std', 'cv']
+    functions: ['mean']  # Changed from ['mean', 'std', 'cv'] to avoid feature duplication
     min_windows: 1
 
 # ============================================================================

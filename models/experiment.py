@@ -217,20 +217,27 @@ class ExperimentManager:
                     print(f"       ⚠️ Insufficient classes for {prefix_name}")
                     continue
 
-                # Use significant features if available, otherwise all
-                feature_subset = (
-                    significant_features
-                    if significant_features and all(f in X_df_prefix.columns for f in significant_features)
-                    else X_df_prefix.columns.tolist()
-                )
+                # Build experiment variants (All Features, Significant, LOO)
+                all_features = X_df_prefix.columns.tolist()
+                experiments = {'All Features': all_features}
 
-                # Train and evaluate model
-                metrics = self._train_and_evaluate_prefix(
-                    X_df_prefix, y_prefix, feature_subset, prefix_name
-                )
+                if significant_features and all(f in X_df_prefix.columns for f in significant_features):
+                    experiments['Significant Features'] = significant_features
 
-                if metrics:
-                    results_list.append(metrics)
+                    # Leave-One-Out experiments for each significant feature
+                    if len(significant_features) > 1:
+                        for feature in significant_features:
+                            subset = [f for f in significant_features if f != feature]
+                            experiments[f'LOO: -{feature}'] = subset
+
+                # Train and evaluate each experiment variant
+                for exp_name, feature_subset in experiments.items():
+                    metrics = self._train_and_evaluate_prefix(
+                        X_df_prefix, y_prefix, feature_subset, prefix_name, exp_name
+                    )
+
+                    if metrics:
+                        results_list.append(metrics)
 
             except Exception as e:
                 print(f"       ❌ Failed {prefix_name}: {e}")
@@ -239,9 +246,9 @@ class ExperimentManager:
 
         return pd.DataFrame(results_list), "SVM"
 
-    def _train_and_evaluate_prefix(self, X_df, y, feature_subset, prefix_name):
+    def _train_and_evaluate_prefix(self, X_df, y, feature_subset, prefix_name, experiment_name):
         """
-        Train and evaluate model for a single prefix length.
+        Train and evaluate model for a single prefix length and experiment variant.
 
         Returns:
             Dict of metrics or None if failed
@@ -274,6 +281,7 @@ class ExperimentManager:
             # Compile results
             result = {
                 'Recording_Length': prefix_name,
+                'Experiment': experiment_name,
                 'N_Samples': len(y),
                 'N_Train': len(y_train),
                 'N_Test': len(y_test),
@@ -285,9 +293,9 @@ class ExperimentManager:
                 'AUC': self._get_metric(metrics, ['roc_auc', 'auc', 'test_roc_auc']),
             }
 
-            print(f"       ✅ {prefix_name}: Acc={result['Accuracy']:.3f}, AUC={result['AUC']:.3f}")
+            print(f"       ✅ {prefix_name} - {experiment_name}: Acc={result['Accuracy']:.3f}")
             return result
 
         except Exception as e:
-            print(f"       ❌ Training failed for {prefix_name}: {e}")
+            print(f"       ❌ Training failed for {prefix_name} - {experiment_name}: {e}")
             return None
