@@ -7,7 +7,7 @@ hyperparameter experiments.
 
 import numpy as np
 from typing import Optional
-from data.loaders import Recording
+from data.recording import RespiratoryRecording
 
 
 class RecordingLengthManager:
@@ -19,9 +19,9 @@ class RecordingLengthManager:
 
     @staticmethod
     def truncate_recording(
-        recording: Recording,
+        recording: RespiratoryRecording,
         duration_minutes: Optional[float] = None
-    ) -> Recording:
+    ) -> RespiratoryRecording:
         """
         Truncate a recording to a specific duration.
 
@@ -30,7 +30,7 @@ class RecordingLengthManager:
             duration_minutes: Duration in minutes. If None, return original recording.
 
         Returns:
-            New Recording object with truncated data
+            New RespiratoryRecording object with truncated data
         """
         if duration_minutes is None:
             # Return original recording unchanged
@@ -48,7 +48,7 @@ class RecordingLengthManager:
         truncated_data = recording.data[:n_samples_desired]
 
         # Create new recording with truncated data
-        truncated_recording = Recording(
+        truncated_recording = RespiratoryRecording(
             data=truncated_data,
             sampling_rate=recording.sampling_rate,
             subject_id=recording.subject_id,
@@ -59,7 +59,7 @@ class RecordingLengthManager:
         return truncated_recording
 
     @staticmethod
-    def get_recording_duration_minutes(recording: Recording) -> float:
+    def get_recording_duration_minutes(recording: RespiratoryRecording) -> float:
         """
         Get the duration of a recording in minutes.
 
