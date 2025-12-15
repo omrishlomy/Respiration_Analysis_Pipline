@@ -135,31 +135,35 @@ class ExperimentManager:
         return "N/A"
 
     def run_experiments_with_length_prefix(
-        self, recordings, labels_df, outcome, recording_lengths,
-        cleaner, win_gen, extractor, aggregator, significant_features, plotter
+        self, pipeline_context, X_df, y, significant_features, recording_lengths
     ):
         """
         Run experiments across different recording length prefixes.
 
-        1. Find best model using full features
-        2. For each recording length prefix (5, 10, 15, 20 min, full):
-           - Extract features using that prefix
-           - Train best model
-           - Evaluate and collect metrics
-        3. Return DataFrame with one row per recording length
+        Args:
+            pipeline_context: Dict with keys: recordings, labels_df, outcome, cleaner,
+                             win_gen, extractor, aggregator
+            X_df: Feature dataframe (not used directly, just for reference)
+            y: Labels (not used directly, just for reference)
+            significant_features: List of significant feature names to use
+            recording_lengths: List of recording lengths in minutes (or None for full)
 
         Returns:
             (results_df, best_model_name)
         """
-        length_manager = RecordingLengthManager()
-
-        print("    🔍 Step 1: Finding best model on full recording features...")
-
-        # Run normal experiments first to find best model
-        # (This uses the features already extracted with full recordings)
         from features.collection import FeatureCollection
 
+        length_manager = RecordingLengthManager()
         results_list = []
+
+        # Unpack context
+        recordings = pipeline_context['recordings']
+        labels_df = pipeline_context['labels_df']
+        outcome = pipeline_context['outcome']
+        cleaner = pipeline_context['cleaner']
+        win_gen = pipeline_context['win_gen']
+        extractor = pipeline_context['extractor']
+        aggregator = pipeline_context['aggregator']
 
         for prefix_length in tqdm(recording_lengths, desc="    Testing Prefixes"):
             prefix_name = RecordingLengthManager.format_length_name(prefix_length)
@@ -171,18 +175,19 @@ class ExperimentManager:
 
                 for rec in recordings:
                     try:
-                        # Truncate to prefix length
                         rec_truncated = length_manager.truncate_recording(rec, prefix_length)
                         rec_clean = cleaner.clean(rec_truncated)
-
                         windows = win_gen.generate_windows(rec_clean)
+
                         rec_feats = []
                         for w in windows:
                             f = extractor.extract(w.data, w.sampling_rate)
                             rec_feats.append(f)
 
                         if rec_feats:
-                            all_subject_features.append(aggregator.aggregate(rec_feats, subject_id=rec.subject_id))
+                            all_subject_features.append(
+                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id)
+                            )
                     except:
                         continue
 
@@ -190,72 +195,42 @@ class ExperimentManager:
                     print(f"       ⚠️ No features extracted for {prefix_name}")
                     continue
 
-                # Create feature dataframe
+                # Create feature dataframe and merge with labels
                 features_df = pd.DataFrame(all_subject_features)
                 features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
 
-                # Merge with labels
-                collection = FeatureCollection(features_df, subject_ids=features_df['SubjectID'].tolist())
-                X_df, y = collection.merge_with_labels(labels_df, on='SubjectID', outcome=outcome)
+                collection = FeatureCollection(
+                    features_df,
+                    subject_ids=features_df['SubjectID'].tolist()
+                )
+                X_df_prefix, y_prefix = collection.merge_with_labels(
+                    labels_df, on='SubjectID', outcome=outcome
+                )
 
-                if 'SubjectID' in X_df.columns:
-                    X_df = X_df.set_index('SubjectID')
+                if 'SubjectID' in X_df_prefix.columns:
+                    X_df_prefix = X_df_prefix.set_index('SubjectID')
 
-                X_df = X_df.select_dtypes(include=[np.number]).fillna(0)
-                y = np.array(y, dtype=int)
+                X_df_prefix = X_df_prefix.select_dtypes(include=[np.number]).fillna(0)
+                y_prefix = np.array(y_prefix, dtype=int)
 
-                if len(np.unique(y)) < 2:
+                if len(np.unique(y_prefix)) < 2:
                     print(f"       ⚠️ Insufficient classes for {prefix_name}")
                     continue
 
                 # Use significant features if available, otherwise all
-                if significant_features and all(f in X_df.columns for f in significant_features):
-                    feature_subset = significant_features
-                else:
-                    feature_subset = X_df.columns.tolist()
-
-                # Train/test split
-                min_class_count = min(np.unique(y, return_counts=True)[1])
-                if min_class_count >= 10:
-                    test_size = 0.2
-                else:
-                    test_size = max(0.2, (2 * len(np.unique(y))) / len(y))
-
-                X_indices = np.arange(len(y))
-                train_idx, test_idx = train_test_split(
-                    X_indices, test_size=test_size, stratify=y, random_state=42
+                feature_subset = (
+                    significant_features
+                    if significant_features and all(f in X_df_prefix.columns for f in significant_features)
+                    else X_df_prefix.columns.tolist()
                 )
 
-                X_train = X_df.iloc[train_idx][feature_subset].values
-                X_test = X_df.iloc[test_idx][feature_subset].values
-                y_train = y[train_idx]
-                y_test = y[test_idx]
+                # Train and evaluate model
+                metrics = self._train_and_evaluate_prefix(
+                    X_df_prefix, y_prefix, feature_subset, prefix_name
+                )
 
-                # Train model
-                clf = SVMClassifier()
-                n_folds = max(2, min(self.model_cfg['cv_folds'], min(np.unique(y_train, return_counts=True)[1])))
-                tuner = GridSearchTuner(cv_folds=n_folds)
-                best_model, best_params = tuner.tune(clf, X_train, y_train, self.model_cfg['tuning']['svm'])
-
-                # Bootstrap evaluation
-                bootstrapper = BootstrapAnalyzer(n_iterations=self.model_cfg['bootstrap_iterations'])
-                metrics = bootstrapper.evaluate(best_model, X_train, y_train)
-
-                # Store results
-                results_list.append({
-                    'Recording_Length': prefix_name,
-                    'N_Samples': len(y),
-                    'N_Train': len(y_train),
-                    'N_Test': len(y_test),
-                    'N_Features': len(feature_subset),
-                    'Hyperparameters': str(best_params),
-                    'Accuracy': self._get_metric(metrics, ['accuracy', 'test_accuracy', 'acc']),
-                    'Sensitivity': self._get_metric(metrics, ['sensitivity', 'recall', 'test_recall']),
-                    'Specificity': self._get_metric(metrics, ['specificity']),
-                    'AUC': self._get_metric(metrics, ['roc_auc', 'auc', 'test_roc_auc']),
-                })
-
-                print(f"       ✅ {prefix_name}: Acc={results_list[-1]['Accuracy']:.3f}, AUC={results_list[-1]['AUC']:.3f}")
+                if metrics:
+                    results_list.append(metrics)
 
             except Exception as e:
                 print(f"       ❌ Failed {prefix_name}: {e}")
@@ -263,3 +238,56 @@ class ExperimentManager:
                 traceback.print_exc()
 
         return pd.DataFrame(results_list), "SVM"
+
+    def _train_and_evaluate_prefix(self, X_df, y, feature_subset, prefix_name):
+        """
+        Train and evaluate model for a single prefix length.
+
+        Returns:
+            Dict of metrics or None if failed
+        """
+        try:
+            # Train/test split
+            min_class_count = min(np.unique(y, return_counts=True)[1])
+            test_size = 0.2 if min_class_count >= 10 else max(0.2, (2 * len(np.unique(y))) / len(y))
+
+            X_indices = np.arange(len(y))
+            train_idx, test_idx = train_test_split(
+                X_indices, test_size=test_size, stratify=y, random_state=42
+            )
+
+            X_train = X_df.iloc[train_idx][feature_subset].values
+            X_test = X_df.iloc[test_idx][feature_subset].values
+            y_train = y[train_idx]
+            y_test = y[test_idx]
+
+            # Train model
+            clf = SVMClassifier()
+            n_folds = max(2, min(self.model_cfg['cv_folds'], min(np.unique(y_train, return_counts=True)[1])))
+            tuner = GridSearchTuner(cv_folds=n_folds)
+            best_model, best_params = tuner.tune(clf, X_train, y_train, self.model_cfg['tuning']['svm'])
+
+            # Bootstrap evaluation
+            bootstrapper = BootstrapAnalyzer(n_iterations=self.model_cfg['bootstrap_iterations'])
+            metrics = bootstrapper.evaluate(best_model, X_train, y_train)
+
+            # Compile results
+            result = {
+                'Recording_Length': prefix_name,
+                'N_Samples': len(y),
+                'N_Train': len(y_train),
+                'N_Test': len(y_test),
+                'N_Features': len(feature_subset),
+                'Hyperparameters': str(best_params),
+                'Accuracy': self._get_metric(metrics, ['accuracy', 'test_accuracy', 'acc']),
+                'Sensitivity': self._get_metric(metrics, ['sensitivity', 'recall', 'test_recall']),
+                'Specificity': self._get_metric(metrics, ['specificity']),
+                'AUC': self._get_metric(metrics, ['roc_auc', 'auc', 'test_roc_auc']),
+            }
+
+            print(f"       ✅ {prefix_name}: Acc={result['Accuracy']:.3f}, AUC={result['AUC']:.3f}")
+            return result
+
+        except Exception as e:
+            print(f"       ❌ Training failed for {prefix_name}: {e}")
+            return None

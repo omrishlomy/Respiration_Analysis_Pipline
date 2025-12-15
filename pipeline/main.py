@@ -188,10 +188,20 @@ def main():
             # 5. Run Models with Recording Length Experiments
             print(f"    Running models across {len(recording_lengths)} recording length prefixes...")
             exp_manager = ExperimentManager(config)
+
+            # Create pipeline context for the experiment manager
+            pipeline_context = {
+                'recordings': recordings,
+                'labels_df': curr_labels,  # Use filtered labels for this outcome
+                'outcome': outcome,
+                'cleaner': cleaner,
+                'win_gen': win_gen,
+                'extractor': extractor,
+                'aggregator': aggregator
+            }
+
             results_df, best_model_name = exp_manager.run_experiments_with_length_prefix(
-                recordings, labels_df, outcome, recording_lengths,
-                cleaner, win_gen, extractor, aggregator,
-                sig_feats, plotter
+                pipeline_context, X_df, y, sig_feats, recording_lengths
             )
 
             # 6. Export
