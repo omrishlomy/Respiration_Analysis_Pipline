@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, accuracy_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from .classifiers import SVMClassifier
+from .neural_network import NeuralNetworkClassifier
 from .evaluation import GridSearchTuner
 from .bootstrap import BootstrapAnalyzer
 from preprocessing.recording_length import RecordingLengthManager
@@ -298,4 +299,159 @@ class ExperimentManager:
 
         except Exception as e:
             print(f"       ❌ Training failed for {prefix_name} - {experiment_name}: {e}")
+            return None
+
+    def run_neural_network_experiments_with_length_prefix(self, pipeline_context, X_df, y, significant_features, recording_lengths):
+        """
+        Run Neural Network experiments across recording length prefixes.
+        Parallel to SVM experiments but uses MLPClassifier.
+
+        Args:
+            pipeline_context: Dict with recordings, cleaner, extractor, etc.
+            X_df: Full feature DataFrame
+            y: Labels
+            significant_features: List of significant feature names
+            recording_lengths: List of recording length prefixes to test
+
+        Returns:
+            DataFrame with Neural Network results
+        """
+        print(f"\n[MODELS] Training Neural Networks")
+        all_results = []
+
+        for prefix_length in tqdm(recording_lengths, desc="    Testing Prefixes (NN)"):
+            # Truncate recordings to prefix length
+            length_manager = RecordingLengthManager()
+            truncated_recordings = [
+                length_manager.truncate_recording(rec, prefix_length)
+                for rec in pipeline_context['recordings']
+            ]
+
+            # Re-extract features for this prefix
+            X_df_prefix, y_prefix = self._extract_features_for_prefix(
+                truncated_recordings, pipeline_context, X_df.index
+            )
+
+            if X_df_prefix is None or len(X_df_prefix) == 0:
+                continue
+
+            prefix_name = RecordingLengthManager.format_length_name(prefix_length)
+
+            # Build experiment variants (All Features, Significant, LOO)
+            all_features = X_df_prefix.columns.tolist()
+            experiments = {'All Features': all_features}
+
+            if significant_features and all(f in X_df_prefix.columns for f in significant_features):
+                experiments['Significant Features'] = significant_features
+
+                # Leave-One-Out experiments for each significant feature
+                if len(significant_features) > 1:
+                    for feature in significant_features:
+                        subset = [f for f in significant_features if f != feature]
+                        experiments[f'LOO: -{feature}'] = subset
+
+            # Train each experiment variant
+            for exp_name, feature_subset in experiments.items():
+                metrics = self._train_and_evaluate_nn_prefix(
+                    X_df_prefix, y_prefix, feature_subset, prefix_name, exp_name
+                )
+                if metrics:
+                    all_results.append(metrics)
+
+        if not all_results:
+            print("    ⚠️  No Neural Network results generated")
+            return pd.DataFrame()
+
+        results_df = pd.DataFrame(all_results)
+        return results_df
+
+    def _train_and_evaluate_nn_prefix(self, X_df, y, feature_subset, prefix_name, experiment_name):
+        """
+        Train and evaluate Neural Network for a specific prefix and experiment.
+
+        Args:
+            X_df: Feature DataFrame for this prefix
+            y: Labels for this prefix
+            feature_subset: List of features to use
+            prefix_name: Name of recording length prefix (e.g., "10min")
+            experiment_name: Name of experiment variant (e.g., "All Features", "LOO: -feature_x")
+
+        Returns:
+            Dict with metrics, or None if training failed
+        """
+        try:
+            X = X_df[feature_subset].values
+
+            # Split data (80/20)
+            min_class_count = min(np.unique(y, return_counts=True)[1])
+            if min_class_count < 2:
+                return None
+
+            test_size = 0.2 if min_class_count >= 10 else max(0.2, (2 * len(np.unique(y))) / len(y))
+
+            train_idx, test_idx = train_test_split(
+                np.arange(len(y)),
+                test_size=test_size,
+                stratify=y,
+                random_state=42
+            )
+
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
+
+            # Create Neural Network classifier
+            nn_clf = NeuralNetworkClassifier(
+                hidden_layer_sizes=(100, 50),  # 2 hidden layers
+                activation='relu',
+                solver='adam',
+                alpha=0.0001,
+                learning_rate_init=0.001,
+                max_iter=500,
+                early_stopping=True,
+                random_state=42
+            )
+
+            # Train on training set
+            nn_clf.train(X_train, y_train, feature_names=feature_subset)
+
+            # Evaluate on test set
+            y_pred = nn_clf.predict(X_test)
+            y_prob = nn_clf.predict_proba(X_test)
+
+            # Calculate metrics
+            accuracy = accuracy_score(y_test, y_pred)
+
+            # Sensitivity (recall for positive class)
+            sensitivity = recall_score(y_test, y_pred, average='binary', pos_label=1)
+
+            # Specificity (recall for negative class)
+            cm = confusion_matrix(y_test, y_pred)
+            if cm.shape[0] == 2:
+                tn, fp, fn, tp = cm.ravel()
+                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+            else:
+                specificity = 0
+
+            # AUC
+            if y_prob.shape[1] == 2:
+                auc = roc_auc_score(y_test, y_prob[:, 1])
+            else:
+                auc = 0
+
+            return {
+                'Recording_Length': prefix_name,
+                'Experiment': experiment_name,
+                'N_Samples': len(y),
+                'N_Train': len(y_train),
+                'N_Test': len(y_test),
+                'N_Features': len(feature_subset),
+                'Architecture': '(100,50)',  # Hidden layer sizes
+                'Accuracy': accuracy,
+                'Sensitivity': sensitivity,
+                'Specificity': specificity,
+                'AUC': auc,
+            }
+
+        except Exception as e:
+            print(f"       ❌ NN training failed for {prefix_name} - {experiment_name}: {e}")
             return None

@@ -166,3 +166,115 @@ class InteractivePlotter:
         fig = go.Figure(data=go.Heatmap(z=cm, colorscale='Blues', showscale=False))
         fig.update_layout(title=title, xaxis_title="Predicted", yaxis_title="True", annotations=annotations)
         fig.write_html(str(save_dir / filename))
+
+    def plot_pca_scatter(self, pca_df, outcome_name, explained_variance):
+        """
+        Plot PCA scatter (PC1 vs PC2) colored by class label.
+
+        Args:
+            pca_df: DataFrame with PC1, PC2, and label columns
+            outcome_name: Name of outcome for title
+            explained_variance: Array of explained variance ratios for PC1, PC2
+        """
+        import plotly.express as px
+
+        fig = px.scatter(
+            pca_df, x='PC1', y='PC2', color='label',
+            hover_data=['subject_id'] if 'subject_id' in pca_df.columns else None,
+            title=f"PCA Projection: {outcome_name}",
+            labels={
+                'PC1': f'PC1 ({explained_variance[0]*100:.1f}% variance)',
+                'PC2': f'PC2 ({explained_variance[1]*100:.1f}% variance)'
+            },
+            color_continuous_scale='Viridis' if pca_df['label'].dtype in ['float64', 'float32'] else None
+        )
+        fig.update_layout(width=800, height=600)
+
+        filename = f"pca_scatter_{outcome_name}.html"
+        fig.write_html(str(self.output_dir / filename))
+
+    def plot_pca_variance(self, variance_df):
+        """
+        Plot scree plot showing variance explained by each component.
+
+        Args:
+            variance_df: DataFrame with component, explained_variance, cumulative_variance columns
+        """
+        from plotly.subplots import make_subplots
+
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=("Variance Explained per Component", "Cumulative Variance")
+        )
+
+        # Individual variance (scree plot)
+        fig.add_trace(go.Bar(
+            x=variance_df['component'],
+            y=variance_df['explained_variance'] * 100,
+            name='Individual',
+            marker_color='steelblue'
+        ), row=1, col=1)
+
+        # Cumulative variance
+        fig.add_trace(go.Scatter(
+            x=variance_df['component'],
+            y=variance_df['cumulative_variance'] * 100,
+            mode='lines+markers',
+            name='Cumulative',
+            line=dict(color='firebrick', width=2),
+            marker=dict(size=6)
+        ), row=1, col=2)
+
+        # Add 95% threshold line
+        fig.add_hline(y=95, line_dash="dash", line_color="gray",
+                      annotation_text="95% threshold", row=1, col=2)
+
+        fig.update_xaxes(title_text="Component", row=1, col=1)
+        fig.update_xaxes(title_text="Component", row=1, col=2)
+        fig.update_yaxes(title_text="Variance Explained (%)", row=1, col=1)
+        fig.update_yaxes(title_text="Cumulative Variance (%)", row=1, col=2)
+
+        fig.update_layout(height=400, width=1000, showlegend=False)
+        fig.write_html(str(self.output_dir / "pca_variance_explained.html"))
+
+    def plot_pca_loadings(self, loadings_df, top_pc1_features, top_pc2_features):
+        """
+        Plot feature loadings (contributions) for PC1 and PC2.
+
+        Args:
+            loadings_df: DataFrame with features as rows, PC1/PC2 as columns
+            top_pc1_features: List of top feature names for PC1
+            top_pc2_features: List of top feature names for PC2
+        """
+        from plotly.subplots import make_subplots
+
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=("Top Features for PC1", "Top Features for PC2")
+        )
+
+        # PC1 loadings
+        pc1_data = loadings_df.loc[top_pc1_features, 'PC1'].sort_values()
+        fig.add_trace(go.Bar(
+            y=pc1_data.index,
+            x=pc1_data.values,
+            orientation='h',
+            name='PC1',
+            marker_color='steelblue'
+        ), row=1, col=1)
+
+        # PC2 loadings
+        pc2_data = loadings_df.loc[top_pc2_features, 'PC2'].sort_values()
+        fig.add_trace(go.Bar(
+            y=pc2_data.index,
+            x=pc2_data.values,
+            orientation='h',
+            name='PC2',
+            marker_color='firebrick'
+        ), row=1, col=2)
+
+        fig.update_xaxes(title_text="Loading", row=1, col=1)
+        fig.update_xaxes(title_text="Loading", row=1, col=2)
+        fig.update_layout(height=600, width=1200, showlegend=False)
+
+        fig.write_html(str(self.output_dir / "pca_feature_loadings.html"))

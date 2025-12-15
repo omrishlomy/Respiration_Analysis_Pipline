@@ -260,6 +260,65 @@ def main():
             plotter.plot_statistical_ranking(stats_df)
             plotter.plot_feature_distributions(X_df, y, outcome, stats_df)
 
+            # 3.5. PCA Analysis and Visualization
+            print("    Running PCA Analysis...")
+            from analysis.dimensionality import PCAReducer
+
+            # Determine number of components (up to 10 or number of features)
+            n_components_full = min(10, X_df.shape[1], X_df.shape[0])
+
+            if n_components_full >= 2:
+                try:
+                    # Create PCA reducer for variance analysis
+                    pca_full = PCAReducer(n_components=n_components_full, scale_data=True)
+                    pca_full.fit(X_df)
+
+                    # Get explained variance
+                    explained_var = pca_full.get_explained_variance()
+                    cumulative_var = pca_full.get_cumulative_variance()
+
+                    print(f"    📊 PCA: {cumulative_var[0]*100:.1f}% variance explained by PC1")
+                    if len(cumulative_var) > 1:
+                        print(f"    📊 PCA: {cumulative_var[1]*100:.1f}% cumulative variance by PC2")
+
+                    # Prepare 2D visualization
+                    pca_2d = PCAReducer(n_components=2, scale_data=True)
+                    pca_viz_df = pca_2d.fit(X_df).prepare_visualization_data(
+                        X_df, labels=y, subject_ids=X_df.index.tolist()
+                    )
+
+                    # Plot 1: PCA scatter plot (PC1 vs PC2)
+                    plotter.plot_pca_scatter(pca_viz_df, outcome, explained_var[:2])
+
+                    # Plot 2: Variance explained (scree plot)
+                    variance_df = pca_full.prepare_variance_plot_data(X_df, max_components=n_components_full)
+                    plotter.plot_pca_variance(variance_df)
+
+                    # Plot 3: Feature loadings (top contributors to PC1 and PC2)
+                    loadings_df = pca_2d.get_loadings()
+                    top_features_pc1 = loadings_df['PC1'].abs().sort_values(ascending=False).head(10)
+                    top_features_pc2 = loadings_df['PC2'].abs().sort_values(ascending=False).head(10)
+                    plotter.plot_pca_loadings(loadings_df, top_features_pc1.index.tolist(), top_features_pc2.index.tolist())
+
+                    # Prepare PCA results for Excel export
+                    pca_results = pd.DataFrame({
+                        'Component': [f'PC{i+1}' for i in range(len(explained_var))],
+                        'Explained_Variance': explained_var,
+                        'Cumulative_Variance': cumulative_var
+                    })
+
+                    # Store for later export
+                    pca_loadings_export = loadings_df.copy()
+
+                except Exception as e:
+                    print(f"    ⚠️  PCA analysis failed: {e}")
+                    pca_results = None
+                    pca_loadings_export = None
+            else:
+                print(f"    ⚠️  Not enough components for PCA (need at least 2, have {n_components_full})")
+                pca_results = None
+                pca_loadings_export = None
+
             # 4. Save Feature Matrices (in dedicated directory)
             feature_matrix_plotter = InteractivePlotter(output_dir=out_dir / "feature_matrices")
             for sid in valid_ids:
@@ -282,14 +341,36 @@ def main():
                 'aggregator': aggregator
             }
 
-            results_df, best_model_name = exp_manager.run_experiments_with_length_prefix(
+            # Run SVM experiments
+            svm_results_df, best_model_name = exp_manager.run_experiments_with_length_prefix(
                 pipeline_context, X_df, y, sig_feats, recording_lengths
             )
 
-            # 6. Export
+            # Run Neural Network experiments
+            print(f"    Running Neural Network models across {len(recording_lengths)} prefixes...")
+            nn_results_df = exp_manager.run_neural_network_experiments_with_length_prefix(
+                pipeline_context, X_df, y, sig_feats, recording_lengths
+            )
+
+            # 6. Export - Multiple Sheets
             exporter = ExcelExporter(filepath=str(out_dir / f"REPORT_{outcome}.xlsx"))
-            exporter.add_sheet("Model_Experiments_By_Prefix", results_df)
+
+            # Add SVM results
+            exporter.add_sheet("SVM_Results_By_Prefix", svm_results_df)
+
+            # Add Neural Network results
+            if nn_results_df is not None and not nn_results_df.empty:
+                exporter.add_sheet("NeuralNetwork_Results", nn_results_df)
+
+            # Add PCA results if available
+            if pca_results is not None:
+                exporter.add_sheet("PCA_Variance_Analysis", pca_results)
+            if pca_loadings_export is not None:
+                exporter.add_sheet("PCA_Feature_Loadings", pca_loadings_export)
+
+            # Add statistical results
             exporter.add_statistical_results_sheet(stats_df)
+
             exporter.write()
             print(f"    ✅ Completed {outcome}")
 
