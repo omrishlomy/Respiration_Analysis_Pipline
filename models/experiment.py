@@ -319,44 +319,95 @@ class ExperimentManager:
         print(f"\n[MODELS] Training Neural Networks")
         all_results = []
 
+        # Extract pipeline components
+        recordings = pipeline_context['recordings']
+        labels_df = pipeline_context['labels_df']
+        outcome = pipeline_context['outcome']
+        cleaner = pipeline_context['cleaner']
+        win_gen = pipeline_context['win_gen']
+        extractor = pipeline_context['extractor']
+        aggregator = pipeline_context['aggregator']
+
         for prefix_length in tqdm(recording_lengths, desc="    Testing Prefixes (NN)"):
-            # Truncate recordings to prefix length
-            length_manager = RecordingLengthManager()
-            truncated_recordings = [
-                length_manager.truncate_recording(rec, prefix_length)
-                for rec in pipeline_context['recordings']
-            ]
+            try:
+                # Truncate recordings to prefix length
+                length_manager = RecordingLengthManager()
+                truncated_recordings = [
+                    length_manager.truncate_recording(rec, prefix_length)
+                    for rec in recordings
+                ]
 
-            # Re-extract features for this prefix
-            X_df_prefix, y_prefix = self._extract_features_for_prefix(
-                truncated_recordings, pipeline_context, X_df.index
-            )
+                prefix_name = RecordingLengthManager.format_length_name(prefix_length)
 
-            if X_df_prefix is None or len(X_df_prefix) == 0:
-                continue
+                # Extract features for this prefix
+                all_subject_features = []
+                for rec in truncated_recordings:
+                    try:
+                        rec_clean = cleaner.clean(rec)
+                        windows = win_gen.generate_windows(rec_clean)
+                        rec_feats = []
+                        for w in windows:
+                            f = extractor.extract(w.data, w.sampling_rate)
+                            rec_feats.append(f)
 
-            prefix_name = RecordingLengthManager.format_length_name(prefix_length)
+                        if rec_feats:
+                            all_subject_features.append(
+                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id)
+                            )
+                    except:
+                        continue
 
-            # Build experiment variants (All Features, Significant, LOO)
-            all_features = X_df_prefix.columns.tolist()
-            experiments = {'All Features': all_features}
+                if not all_subject_features:
+                    print(f"       ⚠️ No features extracted for {prefix_name}")
+                    continue
 
-            if significant_features and all(f in X_df_prefix.columns for f in significant_features):
-                experiments['Significant Features'] = significant_features
+                # Create feature dataframe and merge with labels
+                features_df = pd.DataFrame(all_subject_features)
+                features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
 
-                # Leave-One-Out experiments for each significant feature
-                if len(significant_features) > 1:
-                    for feature in significant_features:
-                        subset = [f for f in significant_features if f != feature]
-                        experiments[f'LOO: -{feature}'] = subset
-
-            # Train each experiment variant
-            for exp_name, feature_subset in experiments.items():
-                metrics = self._train_and_evaluate_nn_prefix(
-                    X_df_prefix, y_prefix, feature_subset, prefix_name, exp_name
+                collection = FeatureCollection(
+                    features_df,
+                    subject_ids=features_df['SubjectID'].tolist()
                 )
-                if metrics:
-                    all_results.append(metrics)
+                X_df_prefix, y_prefix = collection.merge_with_labels(
+                    labels_df, on='SubjectID', outcome=outcome
+                )
+
+                if 'SubjectID' in X_df_prefix.columns:
+                    X_df_prefix = X_df_prefix.set_index('SubjectID')
+
+                X_df_prefix = X_df_prefix.select_dtypes(include=[np.number]).fillna(0)
+                y_prefix = np.array(y_prefix, dtype=int)
+
+                if len(np.unique(y_prefix)) < 2:
+                    print(f"       ⚠️ Insufficient classes for {prefix_name}")
+                    continue
+
+                # Build experiment variants (All Features, Significant, LOO)
+                all_features = X_df_prefix.columns.tolist()
+                experiments = {'All Features': all_features}
+
+                if significant_features and all(f in X_df_prefix.columns for f in significant_features):
+                    experiments['Significant Features'] = significant_features
+
+                    # Leave-One-Out experiments for each significant feature
+                    if len(significant_features) > 1:
+                        for feature in significant_features:
+                            subset = [f for f in significant_features if f != feature]
+                            experiments[f'LOO: -{feature}'] = subset
+
+                # Train each experiment variant
+                for exp_name, feature_subset in experiments.items():
+                    metrics = self._train_and_evaluate_nn_prefix(
+                        X_df_prefix, y_prefix, feature_subset, prefix_name, exp_name
+                    )
+                    if metrics:
+                        all_results.append(metrics)
+
+            except Exception as e:
+                print(f"       ❌ NN Failed {prefix_name}: {e}")
+                import traceback
+                traceback.print_exc()
 
         if not all_results:
             print("    ⚠️  No Neural Network results generated")
