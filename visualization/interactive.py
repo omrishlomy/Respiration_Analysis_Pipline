@@ -12,17 +12,82 @@ class InteractivePlotter:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def plot_signal_traces(self, raw_data, clean_data, fs, subject_id):
+    def plot_signal_traces(self, raw_data, clean_data, fs, subject_id, breath_peaks=None):
+        """
+        Plot raw and cleaned signal traces with optional breath detection overlay.
+
+        Args:
+            raw_data: Raw signal array
+            clean_data: Cleaned signal array
+            fs: Sampling rate in Hz
+            subject_id: Subject identifier
+            breath_peaks: Optional list of BreathPeak objects from breathmetrics algorithm
+        """
         save_dir = self.output_dir / "signals"
         save_dir.mkdir(parents=True, exist_ok=True)
         time = np.arange(len(raw_data)) / fs
 
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
-                            subplot_titles=(f"Raw: {subject_id}", "Cleaned"))
+                            subplot_titles=(f"Raw: {subject_id}", "Cleaned + Breathmetrics"))
         fig.add_trace(go.Scatter(x=time, y=raw_data, name="Raw", line=dict(color='gray', width=1)), row=1, col=1)
         fig.add_trace(go.Scatter(x=time, y=clean_data, name="Cleaned", line=dict(color='#00CC96', width=1)), row=2,
                       col=1)
-        fig.update_layout(height=600, showlegend=False, title_text=f"Signal: {subject_id}")
+
+        # Add breathmetrics overlay if provided
+        if breath_peaks is not None and len(breath_peaks) > 0:
+            # Plot breath boundaries (vertical shaded regions)
+            for i, breath in enumerate(breath_peaks):
+                start_time = breath.StartIndex / fs
+                end_time = breath.EndIndex / fs
+
+                # Alternate colors for breath regions
+                color = 'rgba(255, 200, 100, 0.15)' if i % 2 == 0 else 'rgba(100, 200, 255, 0.15)'
+
+                fig.add_vrect(
+                    x0=start_time, x1=end_time,
+                    fillcolor=color,
+                    layer="below", line_width=0,
+                    row=2, col=1
+                )
+
+            # Plot main peaks
+            main_peak_times = [breath.PeakLocation / fs for breath in breath_peaks]
+            main_peak_values = [breath.PeakValue for breath in breath_peaks]
+
+            fig.add_trace(go.Scatter(
+                x=main_peak_times,
+                y=main_peak_values,
+                mode='markers',
+                name='Main Peaks',
+                marker=dict(size=8, color='red', symbol='circle'),
+                showlegend=True
+            ), row=2, col=1)
+
+            # Plot sub-peaks for multi-phasic breaths
+            sub_peak_times = []
+            sub_peak_values = []
+
+            for breath in breath_peaks:
+                if breath.IsMultiPhasic and breath.SubPeaks:
+                    for sub_peak in breath.SubPeaks:
+                        if not sub_peak.is_main_peak:  # Don't duplicate main peaks
+                            sub_peak_times.append(sub_peak.index / fs)
+                            sub_peak_values.append(sub_peak.value)
+
+            if sub_peak_times:
+                fig.add_trace(go.Scatter(
+                    x=sub_peak_times,
+                    y=sub_peak_values,
+                    mode='markers',
+                    name='Sub-Peaks',
+                    marker=dict(size=6, color='orange', symbol='diamond'),
+                    showlegend=True
+                ), row=2, col=1)
+
+        fig.update_layout(height=600, showlegend=True, title_text=f"Signal: {subject_id}")
+        fig.update_xaxes(title_text="Time (s)", row=2, col=1)
+        fig.update_yaxes(title_text="Amplitude", row=1, col=1)
+        fig.update_yaxes(title_text="Amplitude", row=2, col=1)
 
         safe_name = "".join([c for c in subject_id if c.isalnum() or c in ('-', '_')]).strip()
         fig.write_html(str(save_dir / f"{safe_name}.html"))

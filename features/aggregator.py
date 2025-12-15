@@ -135,7 +135,11 @@ class FeatureAggregator:
             if n_valid < self.min_valid_windows:
                 # Not enough valid windows
                 for func_name in self.aggregation_functions:
-                    agg_feature_name = f"{feature_name}_{func_name}"
+                    # If only one aggregation function, don't append suffix
+                    if len(self.aggregation_functions) == 1:
+                        agg_feature_name = feature_name
+                    else:
+                        agg_feature_name = f"{feature_name}_{func_name}"
                     aggregated[agg_feature_name] = np.nan
                 continue
 
@@ -164,12 +168,20 @@ class FeatureAggregator:
                         agg_value = agg_func(values)
 
                     # Store aggregated feature
-                    agg_feature_name = f"{feature_name}_{func_name}"
+                    # If only one aggregation function, don't append suffix to keep feature names clean
+                    if len(self.aggregation_functions) == 1:
+                        agg_feature_name = feature_name
+                    else:
+                        agg_feature_name = f"{feature_name}_{func_name}"
                     aggregated[agg_feature_name] = agg_value
 
                 except Exception as e:
                     warnings.warn(f"Error aggregating {feature_name} with {func_name}: {e}")
-                    agg_feature_name = f"{feature_name}_{func_name}"
+                    # If only one aggregation function, don't append suffix
+                    if len(self.aggregation_functions) == 1:
+                        agg_feature_name = feature_name
+                    else:
+                        agg_feature_name = f"{feature_name}_{func_name}"
                     aggregated[agg_feature_name] = np.nan
 
         # Add count of valid windows per feature (useful for quality assessment)
@@ -259,7 +271,11 @@ class FeatureAggregator:
 
         for base_name in base_feature_names:
             for func_name in self.aggregation_functions:
-                aggregated_names.append(f"{base_name}_{func_name}")
+                # If only one aggregation function, don't append suffix
+                if len(self.aggregation_functions) == 1:
+                    aggregated_names.append(base_name)
+                else:
+                    aggregated_names.append(f"{base_name}_{func_name}")
 
         return aggregated_names
 

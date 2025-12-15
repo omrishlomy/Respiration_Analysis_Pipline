@@ -36,7 +36,14 @@ class ExperimentManager:
 
         # Create a proper train/test split (80/20) to avoid overfitting
         # Bootstrap will use training set only
-        test_size = min(0.2, 10 / len(y))  # At least 10 samples or 20%, whichever is smaller
+        # Use 20% for test set, but ensure at least 2 samples per class for stratification
+        min_class_count = min(np.unique(y, return_counts=True)[1])
+        if min_class_count >= 10:
+            test_size = 0.2  # Standard 20% split
+        else:
+            # For very small datasets, use at least 2 samples per class in test set
+            test_size = max(0.2, (2 * len(np.unique(y))) / len(y))
+
         X_indices = np.arange(len(y))
         train_idx, test_idx = train_test_split(
             X_indices,

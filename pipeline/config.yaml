@@ -25,6 +25,11 @@ data:
   fs_key: 'fs'
   default_sampling_rate: 6.0
 
+  # Recording Length Experiments (in minutes)
+  # Set to [null] to use full recordings only
+  # Set to [5, 10, 15, 20, null] to test multiple lengths
+  recording_lengths: [5, 10, 15, 20, null]  # null = use full recording
+
 # ============================================================================
 # 2. PREPROCESSING
 # ============================================================================
