@@ -101,6 +101,7 @@ visualization:
   generate_plots: true
   dashboard_filename: "DASHBOARD_SUMMARY.html"
   max_signal_plots: 10  # Only create breathmetrics plots for first N recordings (speeds up processing)
+  force_regenerate_signals: false  # Set to true to regenerate signal plots even if they exist
 
 export:
   filename: "FINAL_REPORT.xlsx"

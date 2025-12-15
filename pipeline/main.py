@@ -93,15 +93,32 @@ def main():
     all_subject_features = []
     feature_matrices = {}
 
-    # Only visualize first 10 recordings to save time (can be changed in config)
+    # Check if signal plots already exist (unless force regenerate is enabled)
+    signals_dir = base_out_dir / "general_plots" / "signals"
+    force_regenerate = config.get('visualization', {}).get('force_regenerate_signals', False)
+
+    if force_regenerate:
+        skip_visualization = False
+        print(f"    🔄 Force regeneration enabled, will recreate signal plots...")
+    else:
+        skip_visualization = signals_dir.exists() and len(list(signals_dir.glob("*.html"))) > 0
+
+    if skip_visualization:
+        print(f"    ℹ️  Signal plots already exist ({len(list(signals_dir.glob('*.html')))} plots found), skipping visualization...")
+    elif not force_regenerate:
+        # Only visualize first N recordings to save time (can be changed in config)
+        viz_limit = config.get('visualization', {}).get('max_signal_plots', 10)
+        print(f"    Creating breathmetrics plots for first {viz_limit} recordings...")
+
+    # Set viz_limit even if skipping, to avoid errors
     viz_limit = config.get('visualization', {}).get('max_signal_plots', 10)
 
     for idx, rec in enumerate(tqdm(recordings, desc="Extracting")):
         try:
             rec_clean = cleaner.clean(rec)
 
-            # Extract breath peaks for visualization (only for first N recordings)
-            if idx < viz_limit:
+            # Extract breath peaks for visualization (only for first N recordings, and only if not already done)
+            if not skip_visualization and idx < viz_limit:
                 _, breath_peaks = extractor.extract_with_details(rec_clean.data, rec_clean.sampling_rate)
                 global_plotter.plot_signal_traces(rec.data, rec_clean.data, rec.sampling_rate, rec.subject_id, breath_peaks)
 
