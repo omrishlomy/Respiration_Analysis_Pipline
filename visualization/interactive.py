@@ -12,27 +12,31 @@ class InteractivePlotter:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def plot_signal_traces(self, raw_data, clean_data, fs, subject_id, breath_peaks=None):
+    def plot_signal_traces(self, raw_data, clean_data, fs, subject_id, recording_date, breath_peaks=None):
         """
-        Plot raw, cleaned, and breathmetrics signal traces.
+        Plot raw, cleaned, and breathmetrics signal traces for a single recording.
 
         Args:
             raw_data: Raw signal array
             clean_data: Cleaned signal array
             fs: Sampling rate in Hz
             subject_id: Subject identifier
+            recording_date: Recording date/identifier
             breath_peaks: Optional list of BreathPeak objects from breathmetrics algorithm
         """
         save_dir = self.output_dir / "signals"
         save_dir.mkdir(parents=True, exist_ok=True)
         time = np.arange(len(raw_data)) / fs
 
+        # Create unique recording identifier
+        recording_id = f"{subject_id}_{recording_date}"
+
         # Create 3 subplots: Raw, Cleaned, Breathmetrics
         fig = make_subplots(
             rows=3, cols=1,
             shared_xaxes=True,
             vertical_spacing=0.08,
-            subplot_titles=(f"Raw: {subject_id}", "Cleaned", "Peak Detection")
+            subplot_titles=(f"Raw: {recording_id}", "Cleaned", "Peak Detection")
         )
 
         fig.add_trace(go.Scatter(x=time, y=raw_data, name="Raw", line=dict(color='gray', width=1)), row=1, col=1)
@@ -75,13 +79,14 @@ class InteractivePlotter:
                     showlegend=True
                 ), row=3, col=1)
 
-        fig.update_layout(height=800, showlegend=True, title_text=f"Signal: {subject_id}")
+        fig.update_layout(height=800, showlegend=True, title_text=f"Signal: {recording_id}")
         fig.update_xaxes(title_text="Time (s)", row=3, col=1)
         fig.update_yaxes(title_text="Amplitude", row=1, col=1)
         fig.update_yaxes(title_text="Amplitude", row=2, col=1)
         fig.update_yaxes(title_text="Respiratory Amplitude", row=3, col=1)
 
-        safe_name = "".join([c for c in subject_id if c.isalnum() or c in ('-', '_')]).strip()
+        # Create safe filename from recording_id
+        safe_name = "".join([c for c in recording_id if c.isalnum() or c in ('-', '_')]).strip()
         fig.write_html(str(save_dir / f"{safe_name}.html"))
 
     def plot_feature_violins(self, X_df, y, outcome_name):

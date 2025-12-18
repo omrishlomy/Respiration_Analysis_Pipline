@@ -188,7 +188,7 @@ class ExperimentManager:
 
                         if rec_feats:
                             all_subject_features.append(
-                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id)
+                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id, recording_date=rec.recording_date)
                             )
                     except:
                         continue
@@ -201,6 +201,13 @@ class ExperimentManager:
                 features_df = pd.DataFrame(all_subject_features)
                 features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
 
+                # Create unique RecordingID to prevent duplicates
+                if 'RecordingDate' in features_df.columns:
+                    features_df['RecordingDate'] = features_df['RecordingDate'].astype(str).str.strip()
+                    features_df['RecordingID'] = features_df['SubjectID'] + '_' + features_df['RecordingDate']
+                else:
+                    features_df['RecordingID'] = features_df['SubjectID']
+
                 collection = FeatureCollection(
                     features_df,
                     subject_ids=features_df['SubjectID'].tolist()
@@ -209,7 +216,10 @@ class ExperimentManager:
                     labels_df, on='SubjectID', outcome=outcome
                 )
 
-                if 'SubjectID' in X_df_prefix.columns:
+                # Use RecordingID as index to ensure uniqueness
+                if 'RecordingID' in X_df_prefix.columns:
+                    X_df_prefix = X_df_prefix.set_index('RecordingID')
+                elif 'SubjectID' in X_df_prefix.columns:
                     X_df_prefix = X_df_prefix.set_index('SubjectID')
 
                 X_df_prefix = X_df_prefix.select_dtypes(include=[np.number]).fillna(0)
@@ -367,7 +377,7 @@ class ExperimentManager:
 
                         if rec_feats:
                             all_subject_features.append(
-                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id)
+                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id, recording_date=rec.recording_date)
                             )
                     except:
                         continue
@@ -380,6 +390,13 @@ class ExperimentManager:
                 features_df = pd.DataFrame(all_subject_features)
                 features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
 
+                # Create unique RecordingID to prevent duplicates
+                if 'RecordingDate' in features_df.columns:
+                    features_df['RecordingDate'] = features_df['RecordingDate'].astype(str).str.strip()
+                    features_df['RecordingID'] = features_df['SubjectID'] + '_' + features_df['RecordingDate']
+                else:
+                    features_df['RecordingID'] = features_df['SubjectID']
+
                 collection = FeatureCollection(
                     features_df,
                     subject_ids=features_df['SubjectID'].tolist()
@@ -391,7 +408,10 @@ class ExperimentManager:
                 # Keep subject IDs before converting to numeric-only
                 subject_ids = X_df_prefix['SubjectID'] if 'SubjectID' in X_df_prefix.columns else X_df_prefix.index
 
-                if 'SubjectID' in X_df_prefix.columns:
+                # Use RecordingID as index to ensure uniqueness
+                if 'RecordingID' in X_df_prefix.columns:
+                    X_df_prefix = X_df_prefix.set_index('RecordingID')
+                elif 'SubjectID' in X_df_prefix.columns:
                     X_df_prefix = X_df_prefix.set_index('SubjectID')
 
                 X_df_prefix = X_df_prefix.select_dtypes(include=[np.number]).fillna(0)
@@ -716,7 +736,7 @@ class ExperimentManager:
 
                         if rec_feats:
                             all_subject_features.append(
-                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id)
+                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id, recording_date=rec.recording_date)
                             )
                     except:
                         continue
@@ -729,6 +749,13 @@ class ExperimentManager:
                 features_df = pd.DataFrame(all_subject_features)
                 features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
 
+                # Create unique RecordingID to prevent duplicates
+                if 'RecordingDate' in features_df.columns:
+                    features_df['RecordingDate'] = features_df['RecordingDate'].astype(str).str.strip()
+                    features_df['RecordingID'] = features_df['SubjectID'] + '_' + features_df['RecordingDate']
+                else:
+                    features_df['RecordingID'] = features_df['SubjectID']
+
                 collection = FeatureCollection(
                     features_df,
                     subject_ids=features_df['SubjectID'].tolist()
@@ -737,21 +764,40 @@ class ExperimentManager:
                     labels_df, on='SubjectID', outcome=outcome
                 )
 
-                # Keep subject IDs
-                subject_ids = X_df_prefix['SubjectID'].values if 'SubjectID' in X_df_prefix.columns else X_df_prefix.index.values
+                # For LOSO, keep SubjectID as a column for grouping (don't set as index yet)
+                # Keep subject IDs array for LOSO splitting
+                subject_ids_array = X_df_prefix['SubjectID'].values if 'SubjectID' in X_df_prefix.columns else None
 
-                if 'SubjectID' in X_df_prefix.columns:
+                # Use RecordingID as index to ensure uniqueness, but keep SubjectID column for LOSO
+                if 'RecordingID' in X_df_prefix.columns:
+                    # For LOSO, we need SubjectID column to group recordings
+                    # Keep SubjectID column, set RecordingID as index
+                    if 'SubjectID' in X_df_prefix.columns:
+                        subject_id_col = X_df_prefix['SubjectID'].copy()
+                        X_df_prefix = X_df_prefix.set_index('RecordingID')
+                        X_df_prefix['SubjectID'] = subject_id_col
+                elif 'SubjectID' in X_df_prefix.columns:
                     X_df_prefix = X_df_prefix.set_index('SubjectID')
 
-                X_df_prefix = X_df_prefix.select_dtypes(include=[np.number]).fillna(0)
+                # Select numeric columns only
+                numeric_cols = X_df_prefix.select_dtypes(include=[np.number]).columns.tolist()
+                X_df_numeric = X_df_prefix[numeric_cols]
+
+                # Keep SubjectID for LOSO grouping
+                if 'SubjectID' in X_df_prefix.columns:
+                    subject_ids_for_loso = X_df_prefix['SubjectID'].values
+                else:
+                    subject_ids_for_loso = X_df_prefix.index.values
+
+                X_df_prefix = X_df_numeric
                 y_prefix = np.array(y_prefix, dtype=int)
 
                 if len(np.unique(y_prefix)) < 2:
                     print(f"       ⚠️ Insufficient classes for {prefix_name}")
                     continue
 
-                # Get unique subjects
-                unique_subjects = X_df_prefix.index.unique()
+                # Get unique subjects for LOSO
+                unique_subjects = np.unique(subject_ids_for_loso)
                 n_subjects = len(unique_subjects)
 
                 print(f"       Running LOSO with {n_subjects} subjects for {prefix_name}")
@@ -766,7 +812,7 @@ class ExperimentManager:
                 for subject_id in unique_subjects:
                     try:
                         # Split by subject: train = all others, test = this subject
-                        test_mask = X_df_prefix.index == subject_id
+                        test_mask = subject_ids_for_loso == subject_id
                         train_mask = ~test_mask
 
                         X_train_full = X_df_prefix[train_mask]

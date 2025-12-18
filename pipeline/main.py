@@ -171,10 +171,10 @@ def main():
                         rec_raw_viz = rec.data
 
                     _, breath_peaks = extractor.extract_with_details(rec_clean_viz, rec_clean.sampling_rate)
-                    global_plotter.plot_signal_traces(rec_raw_viz, rec_clean_viz, rec.sampling_rate, rec.subject_id, breath_peaks)
+                    global_plotter.plot_signal_traces(rec_raw_viz, rec_clean_viz, rec.sampling_rate, rec.subject_id, rec.recording_date, breath_peaks)
                     viz_created_count += 1
                 except Exception as e:
-                    print(f"    ⚠️  Visualization failed for {rec.subject_id}: {e}")
+                    print(f"    ⚠️  Visualization failed for {rec.subject_id}_{rec.recording_date}: {e}")
 
             try:
                 windows = win_gen.generate_windows(rec_clean)
