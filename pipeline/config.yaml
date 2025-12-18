@@ -78,6 +78,11 @@ models:
   cv_folds: 5                   # Cross-validation folds for tuning
   bootstrap_iterations: 100     # Number of bootstrap resamples for CI
 
+  # Leave-One-Subject-Out (LOSO) Cross-Validation
+  loso:
+    enabled: true               # Enable LOSO CV (patient-level cross-validation)
+    top_n_features: 6           # Number of top significant features to use in first experiment
+
   # Neural Network Architecture
   neural_network:
     enabled: false              # Enable Neural Network training (default: false due to small dataset)

@@ -377,6 +377,18 @@ def main():
             else:
                 print(f"    ⚠️  Neural Network training is DISABLED (set models.neural_network.enabled: true to enable)")
 
+            # Run LOSO (Leave-One-Subject-Out) cross-validation (if enabled)
+            loso_results_df = None
+            loso_enabled = config.get('models', {}).get('loso', {}).get('enabled', False)
+
+            if loso_enabled:
+                print(f"    Running Leave-One-Subject-Out (LOSO) cross-validation...")
+                loso_results_df = exp_manager.run_loso_experiments_with_length_prefix(
+                    pipeline_context, X_df, y, sig_feats, recording_lengths
+                )
+            else:
+                print(f"    ⚠️  LOSO cross-validation is DISABLED (set models.loso.enabled: true to enable)")
+
             # 6. Export - Multiple Sheets
             exporter = ExcelExporter(filepath=str(out_dir / f"REPORT_{outcome}.xlsx"))
 
@@ -386,6 +398,10 @@ def main():
             # Add Neural Network results (only if enabled and generated)
             if nn_enabled and nn_results_df is not None and not nn_results_df.empty:
                 exporter.add_sheet("NeuralNetwork_Results", nn_results_df)
+
+            # Add LOSO results (only if enabled and generated)
+            if loso_enabled and loso_results_df is not None and not loso_results_df.empty:
+                exporter.add_sheet("LOSO_Results", loso_results_df)
 
             # Add PCA results if available
             if pca_results is not None:

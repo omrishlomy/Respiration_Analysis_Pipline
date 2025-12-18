@@ -641,3 +641,299 @@ class ExperimentManager:
         except Exception as e:
             print(f"       ❌ NN training failed for {prefix_name} - {experiment_name}: {e}")
             return None
+
+    def run_loso_experiments_with_length_prefix(self, pipeline_context, X_df, y, significant_features, recording_lengths):
+        """
+        Run Leave-One-Subject-Out (LOSO) cross-validation experiments.
+
+        For each subject:
+        1. Train on all OTHER subjects
+        2. Test on that ONE subject
+        3. Repeat for all subjects
+
+        This ensures proper patient-level cross-validation where all recordings
+        from the same patient stay together (no data leakage between train/test).
+
+        Runs TWO experiments per recording length:
+        - Top 6 significant features
+        - All significant features
+
+        Feature selection is done on training subjects only (proper LOSO, no leakage).
+
+        Args:
+            pipeline_context: Dict with recordings, cleaner, extractor, etc.
+            X_df: Full feature DataFrame (not used - kept for compatibility)
+            y: Labels (not used - kept for compatibility)
+            significant_features: Significant features from global analysis (not used)
+            recording_lengths: List of recording length prefixes to test
+
+        Returns:
+            DataFrame with LOSO results including features used
+        """
+        print(f"\n[MODELS] Running Leave-One-Subject-Out (LOSO) Cross-Validation")
+        print(f"    Patient-level CV: Each subject's recordings used ONLY in train OR test")
+        all_results = []
+
+        # Extract pipeline components
+        recordings = pipeline_context['recordings']
+        labels_df = pipeline_context['labels_df']
+        outcome = pipeline_context['outcome']
+        cleaner = pipeline_context['cleaner']
+        win_gen = pipeline_context['win_gen']
+        extractor = pipeline_context['extractor']
+        aggregator = pipeline_context['aggregator']
+
+        # Get statistical test configuration
+        stats_config = self.config.get('analysis', {}).get('statistical', {})
+        test_method = stats_config.get('test', 'mannwhitney')
+        correction_method = stats_config.get('correction', 'fdr_bh')
+
+        # Get LOSO configuration
+        loso_config = self.config.get('models', {}).get('loso', {})
+        top_n_features = loso_config.get('top_n_features', 6)
+
+        for prefix_length in tqdm(recording_lengths, desc="    Testing Prefixes (LOSO)"):
+            try:
+                # Truncate recordings to prefix length
+                length_manager = RecordingLengthManager()
+                truncated_recordings = [
+                    length_manager.truncate_recording(rec, prefix_length)
+                    for rec in recordings
+                ]
+
+                prefix_name = RecordingLengthManager.format_length_name(prefix_length)
+
+                # Extract features for this prefix (from ALL recordings)
+                all_subject_features = []
+                for rec in truncated_recordings:
+                    try:
+                        rec_clean = cleaner.clean(rec)
+                        windows = win_gen.generate_windows(rec_clean)
+                        rec_feats = []
+                        for w in windows:
+                            f = extractor.extract(w.data, w.sampling_rate)
+                            rec_feats.append(f)
+
+                        if rec_feats:
+                            all_subject_features.append(
+                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id)
+                            )
+                    except:
+                        continue
+
+                if not all_subject_features:
+                    print(f"       ⚠️ No features extracted for {prefix_name}")
+                    continue
+
+                # Create feature dataframe and merge with labels
+                features_df = pd.DataFrame(all_subject_features)
+                features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
+
+                collection = FeatureCollection(
+                    features_df,
+                    subject_ids=features_df['SubjectID'].tolist()
+                )
+                X_df_prefix, y_prefix = collection.merge_with_labels(
+                    labels_df, on='SubjectID', outcome=outcome
+                )
+
+                # Keep subject IDs
+                subject_ids = X_df_prefix['SubjectID'].values if 'SubjectID' in X_df_prefix.columns else X_df_prefix.index.values
+
+                if 'SubjectID' in X_df_prefix.columns:
+                    X_df_prefix = X_df_prefix.set_index('SubjectID')
+
+                X_df_prefix = X_df_prefix.select_dtypes(include=[np.number]).fillna(0)
+                y_prefix = np.array(y_prefix, dtype=int)
+
+                if len(np.unique(y_prefix)) < 2:
+                    print(f"       ⚠️ Insufficient classes for {prefix_name}")
+                    continue
+
+                # Get unique subjects
+                unique_subjects = X_df_prefix.index.unique()
+                n_subjects = len(unique_subjects)
+
+                print(f"       Running LOSO with {n_subjects} subjects for {prefix_name}")
+
+                # Run LOSO: For each subject, train on others and test on this one
+                loso_predictions_top6 = []  # For top 6 features experiment
+                loso_predictions_all = []   # For all significant features experiment
+                loso_true_labels = []
+                features_used_top6 = None
+                features_used_all = None
+
+                for subject_id in unique_subjects:
+                    try:
+                        # Split by subject: train = all others, test = this subject
+                        test_mask = X_df_prefix.index == subject_id
+                        train_mask = ~test_mask
+
+                        X_train_full = X_df_prefix[train_mask]
+                        X_test_full = X_df_prefix[test_mask]
+                        y_train = y_prefix[train_mask]
+                        y_test = y_prefix[test_mask]
+
+                        # Skip if no samples
+                        if len(X_train_full) == 0 or len(X_test_full) == 0:
+                            continue
+
+                        # Perform statistical feature selection on TRAINING subjects only
+                        stats_analyzer = StatisticalAnalyzer(test=test_method, correction_method=correction_method)
+                        stats_df_train = stats_analyzer.compare_groups(
+                            X_train_full, y_train,
+                            outcome_name=outcome,
+                            feature_names=X_train_full.columns.tolist()
+                        )
+
+                        # Extract significant features from training data
+                        feat_col = 'feature_name' if 'feature_name' in stats_df_train.columns else 'feature'
+                        sig_feats_train = stats_df_train[stats_df_train['significant'] == True][feat_col].tolist()
+
+                        if len(sig_feats_train) == 0:
+                            # No significant features, skip this fold
+                            continue
+
+                        # Experiment 1: Top N significant features (configurable)
+                        top_n_features_list = sig_feats_train[:top_n_features]
+                        if features_used_top6 is None:
+                            features_used_top6 = top_n_features_list  # Store for reporting
+
+                        pred_top6 = self._train_and_test_loso_fold(
+                            X_train_full, X_test_full, y_train, y_test, top_n_features_list
+                        )
+                        if pred_top6 is not None:
+                            loso_predictions_top6.extend(pred_top6)
+
+                        # Experiment 2: All significant features
+                        if features_used_all is None:
+                            features_used_all = sig_feats_train  # Store for reporting
+
+                        pred_all = self._train_and_test_loso_fold(
+                            X_train_full, X_test_full, y_train, y_test, sig_feats_train
+                        )
+                        if pred_all is not None:
+                            loso_predictions_all.extend(pred_all)
+
+                        # Store true labels
+                        loso_true_labels.extend(y_test)
+
+                    except Exception as e:
+                        print(f"         ⚠️ LOSO fold failed for subject {subject_id}: {e}")
+                        continue
+
+                # Calculate metrics for Top N features
+                if len(loso_predictions_top6) > 0 and len(loso_true_labels) > 0:
+                    metrics_top6 = self._calculate_loso_metrics(
+                        loso_true_labels, loso_predictions_top6,
+                        prefix_name, f"LOSO: Top {top_n_features} Features",
+                        features_used_top6, n_subjects
+                    )
+                    if metrics_top6:
+                        all_results.append(metrics_top6)
+
+                # Calculate metrics for All significant features
+                if len(loso_predictions_all) > 0 and len(loso_true_labels) > 0:
+                    metrics_all = self._calculate_loso_metrics(
+                        loso_true_labels, loso_predictions_all,
+                        prefix_name, "LOSO: All Significant Features",
+                        features_used_all, n_subjects
+                    )
+                    if metrics_all:
+                        all_results.append(metrics_all)
+
+            except Exception as e:
+                print(f"       ❌ LOSO failed for {prefix_name}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        if not all_results:
+            print("    ⚠️  No LOSO results generated")
+            return pd.DataFrame()
+
+        results_df = pd.DataFrame(all_results)
+        return results_df
+
+    def _train_and_test_loso_fold(self, X_train_df, X_test_df, y_train, y_test, feature_subset):
+        """
+        Train SVM on training subjects and test on held-out subject (one LOSO fold).
+
+        Args:
+            X_train_df: Training features DataFrame
+            X_test_df: Test features DataFrame
+            y_train: Training labels
+            y_test: Test labels
+            feature_subset: List of features to use
+
+        Returns:
+            List of predictions for test samples, or None if failed
+        """
+        try:
+            # Extract feature values
+            X_train = X_train_df[feature_subset].values
+            X_test = X_test_df[feature_subset].values
+
+            # Train SVM classifier
+            clf = SVMClassifier()
+            n_folds = max(2, min(self.model_cfg['cv_folds'], min(np.unique(y_train, return_counts=True)[1])))
+            tuner = GridSearchTuner(cv_folds=n_folds)
+            best_model, best_params = tuner.tune(clf, X_train, y_train, self.model_cfg['tuning']['svm'])
+
+            # Predict on test subject
+            y_pred = best_model.predict(X_test)
+
+            return y_pred.tolist()
+
+        except Exception as e:
+            # Silently fail for individual folds
+            return None
+
+    def _calculate_loso_metrics(self, y_true, y_pred, prefix_name, experiment_name, features_used, n_subjects):
+        """
+        Calculate metrics from LOSO predictions.
+
+        Args:
+            y_true: True labels (all test subjects concatenated)
+            y_pred: Predicted labels (all test subjects concatenated)
+            prefix_name: Recording length prefix name
+            experiment_name: Experiment name (e.g., "LOSO: Top 6 Features")
+            features_used: List of feature names used
+            n_subjects: Number of subjects in LOSO
+
+        Returns:
+            Dict with metrics
+        """
+        try:
+            y_true = np.array(y_true)
+            y_pred = np.array(y_pred)
+
+            # Calculate metrics
+            accuracy = accuracy_score(y_true, y_pred)
+            sensitivity = recall_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
+
+            # Specificity
+            cm = confusion_matrix(y_true, y_pred)
+            if cm.shape[0] == 2:
+                tn, fp, fn, tp = cm.ravel()
+                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+            else:
+                specificity = 0
+
+            result = {
+                'Recording_Length': prefix_name,
+                'Experiment': experiment_name,
+                'N_Subjects': n_subjects,
+                'N_Samples': len(y_true),
+                'N_Features': len(features_used) if features_used else 0,
+                'Features_Used': ', '.join(features_used) if features_used else '',
+                'Accuracy': accuracy,
+                'Sensitivity': sensitivity,
+                'Specificity': specificity,
+            }
+
+            print(f"       ✅ {prefix_name} - {experiment_name}: Acc={accuracy:.3f}, N_Features={len(features_used) if features_used else 0}")
+            return result
+
+        except Exception as e:
+            print(f"       ❌ Metric calculation failed for {prefix_name} - {experiment_name}: {e}")
+            return None
