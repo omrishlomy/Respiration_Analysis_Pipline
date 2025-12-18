@@ -68,6 +68,15 @@ def main():
         else:
             labels_df = labels_df.rename(columns={id_col: "SubjectID"})
         labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip()
+
+        # CRITICAL: Deduplicate labels to prevent N_Samples counting errors
+        # If a subject appears multiple times in labels, keep only the first occurrence
+        n_before = len(labels_df)
+        labels_df = labels_df.drop_duplicates(subset=['SubjectID'], keep='first')
+        n_after = len(labels_df)
+        if n_before != n_after:
+            print(f"    ⚠️  Removed {n_before - n_after} duplicate subject entries from labels (kept first occurrence)")
+            print(f"    Labels: {n_before} rows -> {n_after} unique subjects")
     except Exception as e:
         return print(f"❌ LABEL ERROR: {e}")
 
