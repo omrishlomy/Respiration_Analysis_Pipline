@@ -208,6 +208,19 @@ class ExperimentManager:
                 else:
                     features_df['RecordingID'] = features_df['SubjectID']
 
+                # DIAGNOSTIC: Check for duplicates
+                n_recordings_extracted = len(features_df)
+                n_unique_recording_ids = features_df['RecordingID'].nunique()
+                n_unique_subjects = features_df['SubjectID'].nunique()
+
+                print(f"       📊 Extracted features from {n_recordings_extracted} recordings")
+                print(f"          Unique RecordingIDs: {n_unique_recording_ids}, Unique Subjects: {n_unique_subjects}")
+
+                if n_recordings_extracted != n_unique_recording_ids:
+                    duplicate_ids = features_df[features_df.duplicated(subset=['RecordingID'], keep=False)]['RecordingID'].unique()
+                    print(f"          ⚠️  WARNING: {n_recordings_extracted - n_unique_recording_ids} duplicate RecordingIDs found!")
+                    print(f"          Duplicate IDs: {list(duplicate_ids[:5])}{'...' if len(duplicate_ids) > 5 else ''}")
+
                 collection = FeatureCollection(
                     features_df,
                     subject_ids=features_df['SubjectID'].tolist()
@@ -216,14 +229,33 @@ class ExperimentManager:
                     labels_df, on='SubjectID', outcome=outcome
                 )
 
+                # DIAGNOSTIC: Check merge results
+                n_after_merge = len(X_df_prefix)
+                print(f"          After merge with labels: {n_after_merge} samples")
+                if n_after_merge != n_recordings_extracted:
+                    print(f"          ⚠️  Merge changed sample count: {n_recordings_extracted} → {n_after_merge}")
+
                 # Use RecordingID as index to ensure uniqueness
                 if 'RecordingID' in X_df_prefix.columns:
                     X_df_prefix = X_df_prefix.set_index('RecordingID')
                 elif 'SubjectID' in X_df_prefix.columns:
                     X_df_prefix = X_df_prefix.set_index('SubjectID')
 
+                # DIAGNOSTIC: Check for duplicate index
+                if X_df_prefix.index.duplicated().any():
+                    n_duplicates = X_df_prefix.index.duplicated().sum()
+                    duplicate_ids = X_df_prefix.index[X_df_prefix.index.duplicated()].unique()
+                    print(f"          ⚠️  WARNING: {n_duplicates} duplicate indices after set_index!")
+                    print(f"          Duplicate indices: {list(duplicate_ids[:5])}{'...' if len(duplicate_ids) > 5 else ''}")
+
                 X_df_prefix = X_df_prefix.select_dtypes(include=[np.number]).fillna(0)
                 y_prefix = np.array(y_prefix, dtype=int)
+
+                # DIAGNOSTIC: Final sample count
+                final_n_samples = len(X_df_prefix)
+                print(f"          Final N_Samples for training: {final_n_samples}")
+                if final_n_samples != n_after_merge:
+                    print(f"          ⚠️  Sample count changed after processing: {n_after_merge} → {final_n_samples}")
 
                 if len(np.unique(y_prefix)) < 2:
                     print(f"       ⚠️ Insufficient classes for {prefix_name}")
