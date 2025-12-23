@@ -83,6 +83,10 @@ models:
     enabled: true               # Enable LOSO CV (patient-level cross-validation)
     top_n_features: 6           # Number of top significant features to use in first experiment
 
+  # Leave-One-Recording-Out (LORO) Cross-Validation
+  loro:
+    enabled: true               # Enable LORO CV (recording-level CV with participant exclusion)
+
   # Neural Network Architecture
   neural_network:
     enabled: false              # Enable Neural Network training (default: false due to small dataset)

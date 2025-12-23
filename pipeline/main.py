@@ -398,6 +398,18 @@ def main():
             else:
                 print(f"    ⚠️  LOSO cross-validation is DISABLED (set models.loso.enabled: true to enable)")
 
+            # Run LORO (Leave-One-Recording-Out) cross-validation (if enabled)
+            loro_results_df = None
+            loro_enabled = config.get('models', {}).get('loro', {}).get('enabled', False)
+
+            if loro_enabled:
+                print(f"    Running Leave-One-Recording-Out (LORO) cross-validation...")
+                loro_results_df = exp_manager.run_loro_experiments_with_length_prefix(
+                    pipeline_context, X_df, y, sig_feats, recording_lengths
+                )
+            else:
+                print(f"    ⚠️  LORO cross-validation is DISABLED (set models.loro.enabled: true to enable)")
+
             # 6. Export - Multiple Sheets
             exporter = ExcelExporter(filepath=str(out_dir / f"REPORT_{outcome}.xlsx"))
 
@@ -411,6 +423,10 @@ def main():
             # Add LOSO results (only if enabled and generated)
             if loso_enabled and loso_results_df is not None and not loso_results_df.empty:
                 exporter.add_sheet("LOSO_Results", loso_results_df)
+
+            # Add LORO results (only if enabled and generated)
+            if loro_enabled and loro_results_df is not None and not loro_results_df.empty:
+                exporter.add_sheet("LORO_Results", loro_results_df)
 
             # Add PCA results if available
             if pca_results is not None:

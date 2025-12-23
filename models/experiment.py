@@ -229,18 +229,18 @@ class ExperimentManager:
                     print(f"       ⚠️ Insufficient classes for {prefix_name}")
                     continue
 
-                # Build experiment variants (All Features, Significant, LOO)
+                # Build experiment variants (All Features, Incremental Significant Features)
                 all_features = X_df_prefix.columns.tolist()
                 experiments = {'All Features': all_features}
 
                 if significant_features and all(f in X_df_prefix.columns for f in significant_features):
-                    experiments['Significant Features'] = significant_features
+                    experiments['All Significant Features'] = significant_features
 
-                    # Leave-One-Out experiments for each significant feature
+                    # Incremental feature experiments: Top 2, Top 4, Top 6, Top 8, ...
                     if len(significant_features) > 1:
-                        for feature in significant_features:
-                            subset = [f for f in significant_features if f != feature]
-                            experiments[f'LOO: -{feature}'] = subset
+                        for n in range(2, len(significant_features), 2):
+                            top_n = significant_features[:n]
+                            experiments[f'Top {n} Features'] = top_n
 
                 # Train and evaluate each experiment variant
                 for exp_name, feature_subset in experiments.items():
@@ -969,6 +969,270 @@ class ExperimentManager:
                 'Recording_Length': prefix_name,
                 'Experiment': experiment_name,
                 'N_Subjects': n_subjects,
+                'N_Samples': len(y_true),
+                'N_Features': len(features_used) if features_used else 0,
+                'Features_Used': ', '.join(features_used) if features_used else '',
+                'Accuracy': accuracy,
+                'Sensitivity': sensitivity,
+                'Specificity': specificity,
+            }
+
+            print(f"       ✅ {prefix_name} - {experiment_name}: Acc={accuracy:.3f}, N_Features={len(features_used) if features_used else 0}")
+            return result
+
+        except Exception as e:
+            print(f"       ❌ Metric calculation failed for {prefix_name} - {experiment_name}: {e}")
+            return None
+
+    def run_loro_experiments_with_length_prefix(self, pipeline_context, X_df, y, significant_features, recording_lengths):
+        """
+        Run Leave-One-Recording-Out (LOROCV) cross-validation experiments.
+
+        For each recording individually:
+        1. Test on that ONE recording
+        2. Train on ALL other recordings EXCEPT any from the same participant
+        3. Repeat for all recordings
+
+        This is different from LOSO:
+        - LOSO: Test on ALL recordings from one subject together
+        - LORO: Test on ONE recording at a time, exclude all recordings from same subject
+
+        Runs incremental feature experiments:
+        - Top 2, Top 4, Top 6, Top 8, ..., All significant features
+
+        Args:
+            pipeline_context: Dict with recordings, cleaner, extractor, etc.
+            X_df: Full feature DataFrame (not used)
+            y: Labels (not used)
+            significant_features: Significant features from global analysis (not used)
+            recording_lengths: List of recording length prefixes to test
+
+        Returns:
+            DataFrame with LORO results including features used
+        """
+        print(f"\n[MODELS] Running Leave-One-Recording-Out (LORO) Cross-Validation")
+        print(f"    Tests each recording individually while excluding all recordings from same participant")
+        all_results = []
+
+        # Extract pipeline components
+        recordings = pipeline_context['recordings']
+        labels_df = pipeline_context['labels_df']
+        outcome = pipeline_context['outcome']
+        cleaner = pipeline_context['cleaner']
+        win_gen = pipeline_context['win_gen']
+        extractor = pipeline_context['extractor']
+        aggregator = pipeline_context['aggregator']
+
+        # Get statistical test configuration
+        stats_config = self.config.get('analysis', {}).get('statistical', {})
+        test_method = stats_config.get('test', 'mannwhitney')
+        correction_method = stats_config.get('correction', 'fdr_bh')
+
+        for prefix_length in tqdm(recording_lengths, desc="    Testing Prefixes (LORO)"):
+            try:
+                # Truncate recordings to prefix length
+                length_manager = RecordingLengthManager()
+                truncated_recordings = [
+                    length_manager.truncate_recording(rec, prefix_length)
+                    for rec in recordings
+                ]
+
+                prefix_name = RecordingLengthManager.format_length_name(prefix_length)
+
+                # Extract features for this prefix (from ALL recordings)
+                all_subject_features = []
+                for rec in truncated_recordings:
+                    try:
+                        rec_clean = cleaner.clean(rec)
+                        windows = win_gen.generate_windows(rec_clean)
+                        rec_feats = []
+                        for w in windows:
+                            f = extractor.extract(w.data, w.sampling_rate)
+                            rec_feats.append(f)
+
+                        if rec_feats:
+                            all_subject_features.append(
+                                aggregator.aggregate(rec_feats, subject_id=rec.subject_id, recording_date=rec.recording_date)
+                            )
+                    except:
+                        continue
+
+                if not all_subject_features:
+                    print(f"       ⚠️ No features extracted for {prefix_name}")
+                    continue
+
+                # Create feature dataframe and merge with labels
+                features_df = pd.DataFrame(all_subject_features)
+                features_df['SubjectID'] = features_df['SubjectID'].astype(str).str.strip()
+
+                # Create unique RecordingID
+                if 'RecordingDate' in features_df.columns:
+                    features_df['RecordingDate'] = features_df['RecordingDate'].astype(str).str.strip()
+                    features_df['RecordingID'] = features_df['SubjectID'] + '_' + features_df['RecordingDate']
+                else:
+                    features_df['RecordingID'] = features_df['SubjectID']
+
+                collection = FeatureCollection(
+                    features_df,
+                    subject_ids=features_df['SubjectID'].tolist()
+                )
+                X_df_prefix, y_prefix = collection.merge_with_labels(
+                    labels_df, on='SubjectID', outcome=outcome
+                )
+
+                # Keep SubjectID and RecordingID for grouping
+                subject_id_col = X_df_prefix['SubjectID'].copy() if 'SubjectID' in X_df_prefix.columns else None
+                recording_id_col = X_df_prefix['RecordingID'].copy() if 'RecordingID' in X_df_prefix.columns else None
+
+                # Set RecordingID as index
+                if 'RecordingID' in X_df_prefix.columns:
+                    X_df_prefix = X_df_prefix.set_index('RecordingID')
+                elif 'SubjectID' in X_df_prefix.columns:
+                    X_df_prefix = X_df_prefix.set_index('SubjectID')
+
+                # Add SubjectID back as column for grouping
+                if subject_id_col is not None:
+                    X_df_prefix['SubjectID'] = subject_id_col.values
+
+                # Select numeric columns
+                numeric_cols = [col for col in X_df_prefix.columns if col != 'SubjectID']
+                X_df_numeric = X_df_prefix[numeric_cols]
+
+                # Keep SubjectID mapping for exclusion logic
+                subject_ids_array = X_df_prefix['SubjectID'].values if 'SubjectID' in X_df_prefix.columns else None
+
+                X_df_prefix = X_df_numeric
+                y_prefix = np.array(y_prefix, dtype=int)
+
+                if len(np.unique(y_prefix)) < 2:
+                    print(f"       ⚠️ Insufficient classes for {prefix_name}")
+                    continue
+
+                n_recordings = len(X_df_prefix)
+                print(f"       Running LORO with {n_recordings} recordings for {prefix_name}")
+
+                # Statistical analysis on full dataset to get significant features ranking
+                stats_analyzer = StatisticalAnalyzer(test=test_method, correction_method=correction_method)
+                stats_df_full = stats_analyzer.compare_groups(
+                    X_df_prefix, y_prefix,
+                    outcome_name=outcome,
+                    feature_names=X_df_prefix.columns.tolist()
+                )
+
+                feat_col = 'feature_name' if 'feature_name' in stats_df_full.columns else 'feature'
+                sig_feats_ranked = stats_df_full[stats_df_full['significant'] == True][feat_col].tolist()
+
+                if len(sig_feats_ranked) < 2:
+                    print(f"       ⚠️ Not enough significant features for {prefix_name}")
+                    continue
+
+                # Build incremental feature sets: Top 2, Top 4, Top 6, ..., All
+                feature_sets = {}
+                for n in range(2, len(sig_feats_ranked), 2):
+                    feature_sets[f'Top {n} Features'] = sig_feats_ranked[:n]
+                feature_sets['All Significant Features'] = sig_feats_ranked
+
+                # For each feature set, run LORO
+                for exp_name, feature_subset in feature_sets.items():
+                    loro_predictions = []
+                    loro_true_labels = []
+
+                    # LORO: For each recording, test on it, train on all others except same subject
+                    for idx in range(n_recordings):
+                        try:
+                            # Get subject of this recording
+                            test_subject = subject_ids_array[idx] if subject_ids_array is not None else None
+
+                            # Create masks
+                            test_mask = np.zeros(n_recordings, dtype=bool)
+                            test_mask[idx] = True
+
+                            # Train mask: all recordings EXCEPT test recording AND any from same subject
+                            if test_subject is not None and subject_ids_array is not None:
+                                train_mask = (subject_ids_array != test_subject) & (~test_mask)
+                            else:
+                                train_mask = ~test_mask
+
+                            X_train = X_df_prefix.iloc[train_mask][feature_subset].values
+                            X_test = X_df_prefix.iloc[test_mask][feature_subset].values
+                            y_train = y_prefix[train_mask]
+                            y_test = y_prefix[test_mask]
+
+                            if len(X_train) == 0 or len(X_test) == 0:
+                                continue
+
+                            # Train SVM
+                            clf = SVMClassifier()
+                            n_folds = max(2, min(self.model_cfg['cv_folds'], min(np.unique(y_train, return_counts=True)[1])))
+                            tuner = GridSearchTuner(cv_folds=n_folds)
+                            best_model, best_params = tuner.tune(clf, X_train, y_train, self.model_cfg['tuning']['svm'])
+
+                            # Predict on test recording
+                            y_pred = best_model.predict(X_test)
+
+                            loro_predictions.extend(y_pred.tolist())
+                            loro_true_labels.extend(y_test.tolist())
+
+                        except Exception as e:
+                            # Silently skip failed folds
+                            continue
+
+                    # Calculate metrics for this feature set
+                    if len(loro_predictions) > 0 and len(loro_true_labels) > 0:
+                        metrics = self._calculate_loro_metrics(
+                            loro_true_labels, loro_predictions,
+                            prefix_name, exp_name, feature_subset, n_recordings
+                        )
+                        if metrics:
+                            all_results.append(metrics)
+
+            except Exception as e:
+                print(f"       ❌ LORO failed for {prefix_name}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        if not all_results:
+            print("    ⚠️  No LORO results generated")
+            return pd.DataFrame()
+
+        results_df = pd.DataFrame(all_results)
+        return results_df
+
+    def _calculate_loro_metrics(self, y_true, y_pred, prefix_name, experiment_name, features_used, n_recordings):
+        """
+        Calculate metrics from LORO predictions.
+
+        Args:
+            y_true: True labels (all test recordings)
+            y_pred: Predicted labels (all test recordings)
+            prefix_name: Recording length prefix name
+            experiment_name: Experiment name (e.g., "Top 6 Features")
+            features_used: List of feature names used
+            n_recordings: Number of recordings tested
+
+        Returns:
+            Dict with metrics
+        """
+        try:
+            y_true = np.array(y_true)
+            y_pred = np.array(y_pred)
+
+            # Calculate metrics
+            accuracy = accuracy_score(y_true, y_pred)
+            sensitivity = recall_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
+
+            # Specificity
+            cm = confusion_matrix(y_true, y_pred)
+            if cm.shape[0] == 2:
+                tn, fp, fn, tp = cm.ravel()
+                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+            else:
+                specificity = 0
+
+            result = {
+                'Recording_Length': prefix_name,
+                'Experiment': experiment_name,
+                'N_Recordings': n_recordings,
                 'N_Samples': len(y_true),
                 'N_Features': len(features_used) if features_used else 0,
                 'Features_Used': ', '.join(features_used) if features_used else '',
