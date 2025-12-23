@@ -151,12 +151,15 @@ class ExperimentManager:
             recording_lengths: List of recording lengths in minutes (or None for full)
 
         Returns:
-            (results_df, best_model_name)
+            (results_df, best_model_name, removal_tracking_list)
         """
         from features.collection import FeatureCollection
 
         length_manager = RecordingLengthManager()
         results_list = []
+
+        # TRACKING: Recording removal tracking for diagnostic report
+        removal_tracking = []
 
         # Unpack context
         recordings = pipeline_context['recordings']
@@ -174,13 +177,51 @@ class ExperimentManager:
             try:
                 # Extract features with this prefix length
                 all_subject_features = []
+                successfully_processed_ids = set()
 
                 for rec in recordings:
+                    recording_id = f"{rec.subject_id}_{rec.recording_date}" if hasattr(rec, 'recording_date') else rec.subject_id
+
                     try:
                         rec_truncated = length_manager.truncate_recording(rec, prefix_length)
-                        rec_clean = cleaner.clean(rec_truncated)
-                        windows = win_gen.generate_windows(rec_clean)
+                    except Exception as e:
+                        removal_tracking.append({
+                            'Outcome': outcome,
+                            'Recording_Length': prefix_name,
+                            'Recording_ID': recording_id,
+                            'Subject_ID': rec.subject_id,
+                            'Step': 'Truncation',
+                            'Reason': str(e) if str(e) else 'Failed to truncate recording'
+                        })
+                        continue
 
+                    try:
+                        rec_clean = cleaner.clean(rec_truncated)
+                    except Exception as e:
+                        removal_tracking.append({
+                            'Outcome': outcome,
+                            'Recording_Length': prefix_name,
+                            'Recording_ID': recording_id,
+                            'Subject_ID': rec.subject_id,
+                            'Step': 'Cleaning',
+                            'Reason': str(e) if str(e) else 'Failed during signal cleaning'
+                        })
+                        continue
+
+                    try:
+                        windows = win_gen.generate_windows(rec_clean)
+                    except Exception as e:
+                        removal_tracking.append({
+                            'Outcome': outcome,
+                            'Recording_Length': prefix_name,
+                            'Recording_ID': recording_id,
+                            'Subject_ID': rec.subject_id,
+                            'Step': 'Windowing',
+                            'Reason': str(e) if str(e) else 'Failed to generate windows'
+                        })
+                        continue
+
+                    try:
                         rec_feats = []
                         for w in windows:
                             f = extractor.extract(w.data, w.sampling_rate)
@@ -190,7 +231,25 @@ class ExperimentManager:
                             all_subject_features.append(
                                 aggregator.aggregate(rec_feats, subject_id=rec.subject_id, recording_date=rec.recording_date)
                             )
-                    except:
+                            successfully_processed_ids.add(recording_id)
+                        else:
+                            removal_tracking.append({
+                                'Outcome': outcome,
+                                'Recording_Length': prefix_name,
+                                'Recording_ID': recording_id,
+                                'Subject_ID': rec.subject_id,
+                                'Step': 'Feature_Extraction',
+                                'Reason': 'No features extracted (empty rec_feats)'
+                            })
+                    except Exception as e:
+                        removal_tracking.append({
+                            'Outcome': outcome,
+                            'Recording_Length': prefix_name,
+                            'Recording_ID': recording_id,
+                            'Subject_ID': rec.subject_id,
+                            'Step': 'Feature_Extraction',
+                            'Reason': str(e) if str(e) else 'Failed during feature extraction or aggregation'
+                        })
                         continue
 
                 if not all_subject_features:
@@ -221,6 +280,9 @@ class ExperimentManager:
                     print(f"          ⚠️  WARNING: {n_recordings_extracted - n_unique_recording_ids} duplicate RecordingIDs found!")
                     print(f"          Duplicate IDs: {list(duplicate_ids[:5])}{'...' if len(duplicate_ids) > 5 else ''}")
 
+                # Track RecordingIDs before merge
+                recording_ids_before_merge = set(features_df['RecordingID'].tolist())
+
                 collection = FeatureCollection(
                     features_df,
                     subject_ids=features_df['SubjectID'].tolist()
@@ -234,6 +296,28 @@ class ExperimentManager:
                 print(f"          After merge with labels: {n_after_merge} samples")
                 if n_after_merge != n_recordings_extracted:
                     print(f"          ⚠️  Merge changed sample count: {n_recordings_extracted} → {n_after_merge}")
+
+                    # Track which recordings were dropped during merge
+                    if 'RecordingID' in X_df_prefix.columns:
+                        recording_ids_after_merge = set(X_df_prefix['RecordingID'].tolist())
+                    elif X_df_prefix.index.name == 'RecordingID':
+                        recording_ids_after_merge = set(X_df_prefix.index.tolist())
+                    else:
+                        # RecordingID might have been set as index already, check before setting
+                        recording_ids_after_merge = recording_ids_before_merge  # Assume all kept if can't determine
+
+                    dropped_recording_ids = recording_ids_before_merge - recording_ids_after_merge
+                    for dropped_id in dropped_recording_ids:
+                        # Get SubjectID from features_df
+                        subject_id = features_df[features_df['RecordingID'] == dropped_id]['SubjectID'].iloc[0] if not features_df[features_df['RecordingID'] == dropped_id].empty else 'Unknown'
+                        removal_tracking.append({
+                            'Outcome': outcome,
+                            'Recording_Length': prefix_name,
+                            'Recording_ID': dropped_id,
+                            'Subject_ID': subject_id,
+                            'Step': 'Merge_With_Labels',
+                            'Reason': f'Subject not in labels for {outcome} outcome'
+                        })
 
                 # Use RecordingID as index to ensure uniqueness
                 if 'RecordingID' in X_df_prefix.columns:
@@ -306,7 +390,7 @@ class ExperimentManager:
                 import traceback
                 traceback.print_exc()
 
-        return pd.DataFrame(results_list), "SVM"
+        return pd.DataFrame(results_list), "SVM", removal_tracking
 
     def _train_and_evaluate_prefix(self, X_df, y, feature_subset, prefix_name, experiment_name):
         """

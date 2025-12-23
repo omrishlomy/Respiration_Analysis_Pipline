@@ -217,6 +217,9 @@ def main():
     # --- PHASE 2: ANALYSIS ---
     print("\n[PHASE 2] Analysis Loop")
 
+    # Track all recording removals across all outcomes for diagnostic report
+    all_removal_tracking = []
+
     for outcome in data_cfg.get("outcomes", []):
         outcome = outcome.strip()
         print(f"\n🔵 ANALYZING: {outcome}")
@@ -370,9 +373,12 @@ def main():
             }
 
             # Run SVM experiments
-            svm_results_df, best_model_name = exp_manager.run_experiments_with_length_prefix(
+            svm_results_df, best_model_name, removal_tracking = exp_manager.run_experiments_with_length_prefix(
                 pipeline_context, X_df, y, sig_feats, recording_lengths
             )
+
+            # Collect removal tracking data
+            all_removal_tracking.extend(removal_tracking)
 
             # Run Neural Network experiments (if enabled)
             nn_results_df = None
@@ -445,6 +451,34 @@ def main():
         except Exception as e:
             print(f"    ❌ FAILED {outcome}: {e}")
             traceback.print_exc()
+
+    # Generate Recording Removal Diagnostic Report
+    if all_removal_tracking:
+        print("\n📋 Generating Recording Removal Diagnostic Report...")
+        removal_df = pd.DataFrame(all_removal_tracking)
+
+        # Save as CSV for easy inspection
+        report_path = base_out_dir / "RECORDING_REMOVAL_REPORT.csv"
+        removal_df.to_csv(report_path, index=False)
+        print(f"    ✅ Report saved to: {report_path}")
+
+        # Print summary statistics
+        print(f"\n    📊 Removal Summary:")
+        print(f"       Total removals tracked: {len(removal_df)}")
+
+        # Group by step
+        step_counts = removal_df['Step'].value_counts()
+        print(f"\n       Removals by processing step:")
+        for step, count in step_counts.items():
+            print(f"         • {step}: {count} recordings")
+
+        # Group by outcome
+        outcome_counts = removal_df['Outcome'].value_counts()
+        print(f"\n       Removals by outcome:")
+        for outcome, count in outcome_counts.items():
+            print(f"         • {outcome}: {count} removals")
+    else:
+        print("\n    ℹ️  No recording removals to report (all recordings processed successfully)")
 
     print("\n✅ Pipeline Finished.")
 
