@@ -1094,12 +1094,11 @@ class ExperimentManager:
                 if subject_id_col is not None:
                     X_df_prefix['SubjectID'] = subject_id_col.values
 
-                # Select numeric columns
-                numeric_cols = [col for col in X_df_prefix.columns if col != 'SubjectID']
-                X_df_numeric = X_df_prefix[numeric_cols]
-
-                # Keep SubjectID mapping for exclusion logic
+                # Keep SubjectID mapping for exclusion logic (before filtering to numeric)
                 subject_ids_array = X_df_prefix['SubjectID'].values if 'SubjectID' in X_df_prefix.columns else None
+
+                # Select ONLY numeric columns (fixes np.isnan() TypeError)
+                X_df_numeric = X_df_prefix.select_dtypes(include=[np.number])
 
                 X_df_prefix = X_df_numeric
                 y_prefix = np.array(y_prefix, dtype=int)
