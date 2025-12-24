@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, accuracy_score
 from .classifiers import Classifier
 
 
@@ -102,3 +102,86 @@ class ModelEvaluator:
             results['auc'] = np.nan
 
         return results
+
+
+class LeaveOneRecordingOut:
+    """
+    Leave-One-Recording-Out Cross-Validation with Subject Exclusion.
+
+    When a recording is held out for testing, ALL recordings from that subject
+    are excluded from the training set to prevent data leakage.
+    """
+
+    def __init__(self, subject_ids: List[str]):
+        """
+        Initialize LORO CV.
+
+        Args:
+            subject_ids: List of subject IDs corresponding to each sample/recording
+        """
+        self.subject_ids = np.array(subject_ids)
+        self.n_samples = len(subject_ids)
+
+    def split(self, X: np.ndarray, y: np.ndarray):
+        """
+        Generate train/test splits.
+
+        Yields:
+            Tuple of (train_indices, test_indices) for each recording
+        """
+        for i in range(self.n_samples):
+            # Hold out recording i for testing
+            test_idx = np.array([i])
+
+            # Get the subject of the held-out recording
+            test_subject = self.subject_ids[i]
+
+            # Exclude ALL recordings from this subject from training
+            train_mask = self.subject_ids != test_subject
+            train_idx = np.where(train_mask)[0]
+
+            yield train_idx, test_idx
+
+    def get_n_splits(self):
+        """Number of splits."""
+        return self.n_samples
+
+
+class LeaveOneSubjectOut:
+    """
+    Leave-One-Subject-Out Cross-Validation.
+
+    All recordings from one subject are held out for testing.
+    """
+
+    def __init__(self, subject_ids: List[str]):
+        """
+        Initialize LOSO CV.
+
+        Args:
+            subject_ids: List of subject IDs corresponding to each sample/recording
+        """
+        self.subject_ids = np.array(subject_ids)
+        self.unique_subjects = np.unique(subject_ids)
+        self.n_subjects = len(self.unique_subjects)
+
+    def split(self, X: np.ndarray, y: np.ndarray):
+        """
+        Generate train/test splits.
+
+        Yields:
+            Tuple of (train_indices, test_indices) for each subject
+        """
+        for subject in self.unique_subjects:
+            # Hold out all recordings from this subject for testing
+            test_mask = self.subject_ids == subject
+            train_mask = ~test_mask
+
+            test_idx = np.where(test_mask)[0]
+            train_idx = np.where(train_mask)[0]
+
+            yield train_idx, test_idx
+
+    def get_n_splits(self):
+        """Number of splits."""
+        return self.n_subjects

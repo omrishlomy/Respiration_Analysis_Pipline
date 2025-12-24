@@ -114,6 +114,23 @@ class BootstrapAnalyzer:
                 'recall': recall_score(y_test, y_pred, average='weighted')
             }
 
+            # Calculate Sensitivity and Specificity from confusion matrix for binary classification
+            if len(np.unique(y_test)) == 2:
+                from sklearn.metrics import confusion_matrix
+                cm = confusion_matrix(y_test, y_pred)
+
+                # For binary classification: cm[0,0]=TN, cm[0,1]=FP, cm[1,0]=FN, cm[1,1]=TP
+                if cm.shape == (2, 2):
+                    tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+                    metrics['sensitivity'] = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                    metrics['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+                else:
+                    metrics['sensitivity'] = metrics['recall']
+                    metrics['specificity'] = np.nan
+            else:
+                metrics['sensitivity'] = metrics['recall']
+                metrics['specificity'] = np.nan
+
             if y_prob is not None and len(np.unique(y)) == 2:
                 try:
                     metrics['auc'] = roc_auc_score(y_test, y_prob)
@@ -124,10 +141,16 @@ class BootstrapAnalyzer:
 
         return self._summarize_results()
 
-    def _summarize_results(self) -> pd.DataFrame:
-        """Calculate Mean, Std, and 95% Confidence Intervals."""
+    def _summarize_results(self) -> Dict[str, Dict[str, float]]:
+        """
+        Calculate Mean, Std, and 95% Confidence Intervals.
+
+        Returns:
+            Dict mapping metric name to dict of statistics
+            Example: {'accuracy': {'mean': 0.85, 'std': 0.02, 'ci_lower_95': 0.81, 'ci_upper_95': 0.89}}
+        """
         df = pd.DataFrame(self.results)
-        summary = []
+        summary = {}
 
         for col in df.columns:
             values = df[col].dropna()
@@ -140,12 +163,11 @@ class BootstrapAnalyzer:
             ci_lower = np.percentile(values, 2.5)
             ci_upper = np.percentile(values, 97.5)
 
-            summary.append({
-                'metric': col,
+            summary[col] = {
                 'mean': mean_val,
                 'std': std_val,
                 'ci_lower_95': ci_lower,
                 'ci_upper_95': ci_upper
-            })
+            }
 
-        return pd.DataFrame(summary).set_index('metric')
+        return summary

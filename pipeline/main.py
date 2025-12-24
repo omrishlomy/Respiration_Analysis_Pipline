@@ -325,7 +325,7 @@ def main():
 
             # 5. Run Models
             exp_manager = ExperimentManager(config)
-            results_df, _ = exp_manager.run_experiments(X_df, y, sig_feats, plotter=plotter)
+            results_df, _ = exp_manager.run_experiments(X_df, y, sig_feats, plotter=plotter, subject_ids=stored_subject_ids)
 
             # 6. Export
             exporter = ExcelExporter(filepath=str(out_dir / f"REPORT_{outcome}.xlsx"))
