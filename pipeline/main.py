@@ -68,8 +68,13 @@ def main():
         else:
             labels_df = labels_df.rename(columns={id_col: "SubjectID"})
 
-        # CRITICAL FIX: Normalize SubjectID to uppercase for case-insensitive matching
+        # CRITICAL FIX: Normalize SubjectID to uppercase and take first 4 characters only
+        # (matches filename format: ABCD - date.mat, where ABCD is the 4-letter subject ID)
         labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip().str.upper()
+
+        # Extract only first 4 characters to match filename format
+        # This handles cases like "EBEB - SLEEPY NO CNC" → "EBEB"
+        labels_df['SubjectID'] = labels_df['SubjectID'].str[:4]
 
         # CRITICAL FIX: Add RecordingDate column from second column (date column)
         # The date is in the second column (index 1) in format day.month.year
@@ -214,22 +219,31 @@ def main():
             if outcome not in curr_labels.columns: continue
 
             # Separate metadata columns from features before creating FeatureCollection
-            metadata_cols = ['SubjectID', 'RecordingDate', 'N_Windows']
+            # Keep SubjectID and RecordingDate in the DataFrame for merging (will be removed before training)
+            # Only exclude N_Windows as it's just a count
+            metadata_cols = ['N_Windows']
             feature_cols = [col for col in master_features_df.columns if col not in metadata_cols]
 
-            # Create FeatureCollection with only feature columns, pass SubjectID separately
-            features_only_df = master_features_df[feature_cols].copy()
+            # Create FeatureCollection with SubjectID and RecordingDate included
+            features_with_metadata = master_features_df[feature_cols].copy()
             subject_ids_list = master_features_df['SubjectID'].tolist()
 
-            collection = FeatureCollection(features_only_df, subject_ids=subject_ids_list)
+            collection = FeatureCollection(features_with_metadata, subject_ids=subject_ids_list)
 
             # Debug: Show what we have before merge
-            n_before_merge = len(features_only_df)
+            n_before_merge = len(features_with_metadata)
             unique_subjects_in_features = set(subject_ids_list)
             unique_subjects_in_labels = set(curr_labels['SubjectID'].astype(str).str.strip().tolist())
 
             print(f"    📊 Before merge: {n_before_merge} recordings from {len(unique_subjects_in_features)} unique subjects")
             print(f"    📋 Labels available for: {len(unique_subjects_in_labels)} subjects")
+
+            # Debug: Show sample RecordingDate values to verify they match
+            if 'RecordingDate' in features_with_metadata.columns and 'RecordingDate' in curr_labels.columns:
+                sample_dates_features = features_with_metadata['RecordingDate'].head(3).tolist()
+                sample_dates_labels = curr_labels['RecordingDate'].head(3).tolist()
+                print(f"    📅 Sample dates in features: {sample_dates_features}")
+                print(f"    📅 Sample dates in labels: {sample_dates_labels}")
 
             # Find mismatches
             subjects_with_features_no_labels = unique_subjects_in_features - unique_subjects_in_labels
