@@ -31,7 +31,8 @@ class ExperimentManager:
         predictions = {}
 
         classes, counts = np.unique(y, return_counts=True)
-        print(f"    🔍 DATA DEBUG: Total Samples: {len(y)} | Balance: {dict(zip(classes, counts))}")
+        n_recordings = len(y)
+        print(f"    🔍 CLASSIFIER DATA: N = {n_recordings} recordings (samples) | Balance: {dict(zip(classes, counts))}")
 
         n_folds = max(2, min(self.model_cfg['cv_folds'], min(counts)))
 

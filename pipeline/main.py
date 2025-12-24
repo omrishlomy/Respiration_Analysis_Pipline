@@ -105,8 +105,12 @@ def main():
 
             if not rec_feats: continue
 
-            all_subject_features.append(aggregator.aggregate(rec_feats, subject_id=rec.subject_id))
-            feature_matrices[rec.subject_id] = pd.DataFrame(rec_feats).set_index('WindowIndex').select_dtypes(
+            # Pass both subject_id AND recording_date to properly distinguish multiple recordings per subject
+            all_subject_features.append(aggregator.aggregate(rec_feats, subject_id=rec.subject_id, recording_date=rec.recording_date))
+
+            # Use unique recording ID to avoid overwriting when same subject has multiple recordings
+            recording_id = f"{rec.subject_id}_{rec.recording_date}"
+            feature_matrices[recording_id] = pd.DataFrame(rec_feats).set_index('WindowIndex').select_dtypes(
                 include=[np.number])
 
         except Exception:
@@ -115,6 +119,12 @@ def main():
     if not all_subject_features: return print("❌ No features extracted.")
     master_features_df = pd.DataFrame(all_subject_features)
     master_features_df['SubjectID'] = master_features_df['SubjectID'].astype(str).str.strip()
+
+    # Debug: Show total recordings processed
+    n_total_recordings = len(master_features_df)
+    n_unique_subjects = master_features_df['SubjectID'].nunique()
+    print(f"\n✅ Extracted features from {n_total_recordings} recordings from {n_unique_subjects} unique subjects")
+
     master_features_df.to_csv(base_out_dir / "all_extracted_features.csv", index=False)
 
     # --- PHASE 2: ANALYSIS ---
@@ -136,16 +146,37 @@ def main():
             if outcome not in curr_labels.columns: continue
 
             collection = FeatureCollection(master_features_df, subject_ids=master_features_df['SubjectID'].tolist())
+
+            # Merge features with labels on SubjectID (one label per subject can match multiple recordings)
             X_df, y = collection.merge_with_labels(curr_labels, on='SubjectID', outcome=outcome)
 
+            # Debug: Print actual counts
+            n_recordings = len(X_df)
+            n_unique_participants = X_df['SubjectID'].nunique() if 'SubjectID' in X_df.columns else 0
+            print(f"    ℹ️ N = {n_recordings} recordings from {n_unique_participants} unique participants")
+
+            # Store SubjectID and RecordingDate for tracking, then remove from features
             if 'SubjectID' in X_df.columns:
                 valid_ids = X_df['SubjectID'].tolist()
-                X_df = X_df.set_index('SubjectID')
+                # Keep SubjectID for potential train/test splitting by subject
+                # But don't use it as a feature for training
             else:
                 valid_ids = []
 
-            # Clean
-            X_df = X_df.select_dtypes(include=[np.number]).fillna(0)
+            # Clean and handle NaN values more robustly
+            X_df = X_df.select_dtypes(include=[np.number])
+
+            # Replace infinite values with NaN first
+            X_df = X_df.replace([np.inf, -np.inf], np.nan)
+
+            # Fill NaN values with 0 (or could use median/mean imputation)
+            X_df = X_df.fillna(0)
+
+            # Verify no NaN or inf values remain
+            if X_df.isnull().any().any():
+                print(f"    ⚠️ WARNING: NaN values still present after cleaning!")
+                X_df = X_df.fillna(0)  # Extra safety
+
             y = np.array(y, dtype=int)
             if len(np.unique(y)) < 2: continue
 
