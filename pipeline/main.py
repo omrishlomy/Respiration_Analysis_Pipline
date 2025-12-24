@@ -76,12 +76,25 @@ def main():
         # This handles cases like "EBEB - SLEEPY NO CNC" → "EBEB"
         labels_df['SubjectID'] = labels_df['SubjectID'].str[:4]
 
-        # CRITICAL FIX: Add RecordingDate column from second column (date column)
-        # The date is in the second column (index 1) in format day.month.year
-        if len(labels_df.columns) > 1:
-            date_col = labels_df.columns[1]
-            print(f"    Detected date column: '{date_col}'")
+        # CRITICAL FIX: Auto-detect RecordingDate column
+        # Try to find a column with date-like name first, otherwise use column 2
+        date_col = None
+        date_keywords = ['date', 'recording', 'recordingdate', 'session', 'time']
 
+        print(f"    Searching for date column among: {list(labels_df.columns)}")
+
+        for col in labels_df.columns:
+            col_lower = str(col).lower().strip()
+            if any(keyword in col_lower for keyword in date_keywords):
+                date_col = col
+                print(f"    ✓ Auto-detected date column: '{date_col}' (matched keyword)")
+                break
+
+        if date_col is None and len(labels_df.columns) > 1:
+            date_col = labels_df.columns[1]
+            print(f"    Using column index 1 as date: '{date_col}'")
+
+        if date_col is not None:
             # Convert date column to RecordingDate in YYYYMMDD format
             def parse_date_to_yyyymmdd(date_str):
                 """Convert date from various formats to YYYYMMDD string."""
@@ -102,9 +115,31 @@ def main():
                         month = month.zfill(2)
                         return f"{year}{month}{day}"
 
-                # Try parsing as pandas datetime
+                # Try parsing slash format (e.g., "22/8/16" or "8/22/2016")
+                if '/' in date_str:
+                    parts = date_str.split('/')
+                    if len(parts) == 3:
+                        # Try day/month/year
+                        try:
+                            day, month, year = parts
+                            if len(year) == 2:
+                                year = '20' + year
+                            day = day.zfill(2)
+                            month = month.zfill(2)
+                            return f"{year}{month}{day}"
+                        except:
+                            pass
+
+                # Try parsing dash format (e.g., "2016-08-22")
+                if '-' in date_str:
+                    parts = date_str.split('-')
+                    if len(parts) == 3 and len(parts[0]) == 4:
+                        # YYYY-MM-DD format
+                        return ''.join(parts)
+
+                # Try parsing as pandas datetime (handles many formats)
                 try:
-                    dt = pd.to_datetime(date_str)
+                    dt = pd.to_datetime(date_str, dayfirst=True)  # European format default
                     return dt.strftime('%Y%m%d')
                 except:
                     pass
@@ -112,6 +147,12 @@ def main():
                 return None
 
             labels_df['RecordingDate'] = labels_df[date_col].apply(parse_date_to_yyyymmdd)
+
+            # Debug: Show sample parsed dates to verify parsing
+            sample_original = labels_df[date_col].head(5).tolist()
+            sample_parsed = labels_df['RecordingDate'].head(5).tolist()
+            print(f"    Sample raw dates from Excel column '{date_col}': {sample_original}")
+            print(f"    Sample parsed dates (YYYYMMDD format): {sample_parsed}")
 
             # Remove rows with invalid dates
             n_before = len(labels_df)
