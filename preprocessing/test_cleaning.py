@@ -24,7 +24,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from data.loaders import load_recordings_from_directory
+from data.loaders import MATDataLoader
 from preprocessing.cleaner import SignalCleaner
 from data.recording import RespiratoryRecording
 
@@ -155,16 +155,14 @@ def test_cleaning(config_path=None, data_dir=None, output_dir=None, max_recordin
 
     # Load recordings
     print(f"\n📥 Loading recordings from: {data_dir}")
-    recordings, failed = load_recordings_from_directory(
-        data_dir,
-        data_key=config['data'].get('data_key', 'data'),
-        fs_key=config['data'].get('fs_key', 'fs'),
-        default_fs=config['data'].get('default_sampling_rate', 6.0)
-    )
+    loader = MATDataLoader(default_sampling_rate=config['data'].get('default_sampling_rate', 6.0))
+    recordings = loader.load_batch(str(data_dir))
+
+    if not recordings:
+        print("    ❌ No recordings found!")
+        return 0, 0
 
     print(f"    ✅ Loaded: {len(recordings)} recordings")
-    if failed:
-        print(f"    ⚠️  Failed: {failed} recordings")
 
     # Limit recordings if specified
     if max_recordings and len(recordings) > max_recordings:
