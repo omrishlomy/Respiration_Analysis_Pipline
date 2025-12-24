@@ -37,13 +37,31 @@ preprocessing:
   cleaning:
     remove_outliers: true
     apply_filter: true
-    filter_type: 'bandpass'
-    lowcut: 0.05
-    highcut: 0.5
+    filter_type: 'bandpass'           # 'bandpass', 'lowpass', 'highpass'
+    lowcut: 0.05                      # Hz - lower cutoff frequency
+    highcut: 0.5                      # Hz - upper cutoff frequency
+    filter_order: 4                   # Filter order for Butterworth filter
+    detrend: 'linear'                 # 'linear', 'constant', or null for no detrending
 
   windowing:
     window_size: 300       # 5 minutes
     overlap: 60            # 1 minute overlap
+
+# ============================================================================
+# 2.5 DATA QUALITY CHECKS
+# ============================================================================
+data_quality:
+  enabled: true                       # Enable quality checking
+  gap_threshold: 0.0                  # Threshold for detecting gaps (values at/below this)
+  min_gap_duration_sec: 1.0           # Minimum gap duration to flag (seconds)
+  flat_threshold: 0.001               # Threshold for detecting flat regions (std dev)
+  min_flat_duration_sec: 5.0          # Minimum flat duration to flag (seconds)
+  outlier_threshold_std: 10.0         # Number of std deviations for outlier detection
+  physiological_min: -100.0           # Minimum physiologically plausible value
+  physiological_max: 100.0            # Maximum physiologically plausible value
+  min_valid_percent: 80.0             # Minimum % of valid data required
+  reject_threshold: 50.0              # Reject if valid% below this
+  auto_clean: true                    # Automatically clean detected issues
 
 # ============================================================================
 # 3. FEATURE EXTRACTION

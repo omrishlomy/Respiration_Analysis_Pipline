@@ -345,35 +345,21 @@ class ExperimentManager:
                     print(f"       ⚠️ Insufficient classes for {prefix_name}")
                     continue
 
-                # Run statistical analysis on THIS prefix to find significant features
-                # (instead of using global significant_features which may be 0 when combining all lengths)
-                from analysis.statistical import StatisticalAnalyzer
-                test_method = self.config['analysis']['statistical'].get('test', 'mannwhitneyu')
-                correction_method = self.config['analysis']['statistical'].get('correction', 'fdr_bh')
-
-                stats_analyzer = StatisticalAnalyzer(test=test_method, correction_method=correction_method)
-                stats_df_prefix = stats_analyzer.compare_groups(
-                    X_df_prefix, y_prefix,
-                    outcome_name=outcome,
-                    feature_names=X_df_prefix.columns.tolist()
-                )
-
-                # Extract significant features for THIS prefix
-                feat_col = 'feature_name' if 'feature_name' in stats_df_prefix.columns else 'feature'
-                sig_feats_prefix = stats_df_prefix[stats_df_prefix['significant'] == True][feat_col].tolist() if feat_col in stats_df_prefix.columns else []
-                print(f"       Found {len(sig_feats_prefix)} significant features for {prefix_name}")
+                # Use GLOBAL significant features (calculated ONCE at analysis layer on full dataset)
+                # This ensures consistency across all recording lengths
+                print(f"       Using {len(significant_features) if significant_features else 0} global significant features")
 
                 # Build experiment variants (All Features, Incremental Significant Features)
                 all_features = X_df_prefix.columns.tolist()
                 experiments = {'All Features': all_features}
 
-                if sig_feats_prefix and all(f in X_df_prefix.columns for f in sig_feats_prefix):
-                    experiments['All Significant Features'] = sig_feats_prefix
+                if significant_features and all(f in X_df_prefix.columns for f in significant_features):
+                    experiments['All Significant Features'] = significant_features
 
                     # Incremental feature experiments: Top 2, Top 4, Top 6, Top 8, ...
-                    if len(sig_feats_prefix) > 1:
-                        for n in range(2, len(sig_feats_prefix), 2):
-                            top_n = sig_feats_prefix[:n]
+                    if len(significant_features) > 1:
+                        for n in range(2, len(significant_features), 2):
+                            top_n = significant_features[:n]
                             experiments[f'Top {n} Features'] = top_n
 
                 # Train and evaluate each experiment variant
