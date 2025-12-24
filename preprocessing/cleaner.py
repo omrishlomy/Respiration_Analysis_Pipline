@@ -16,28 +16,8 @@ from dataclasses import dataclass
 import sys
 import os
 
-# =============================================================================
-# CRITICAL IMPORT FIX: Ensure RespiratoryRecording is imported
-# =============================================================================
-try:
-    # 1. Try Absolute Import (Standard)
-    from respiratory_analysis.data.recording import RespiratoryRecording
-except ImportError:
-    try:
-        # 2. Try Relative Import (If running as module)
-        from ..data.recording import RespiratoryRecording
-    except ImportError:
-        # 3. Fallback: Add project root to sys.path
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(os.path.dirname(current_dir))
-        if project_root not in sys.path:
-            sys.path.append(project_root)
-        try:
-            from respiratory_analysis.data.recording import RespiratoryRecording
-        except ImportError:
-             raise ImportError("❌ CRITICAL: Could not import RespiratoryRecording. Check project structure.")
-
-# =============================================================================
+# Direct import - simple and works
+from data.recording import RespiratoryRecording
 
 @dataclass
 class QualityIssue:
