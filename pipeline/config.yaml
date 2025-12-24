@@ -36,7 +36,7 @@ data:
 preprocessing:
   cleaning:
     remove_outliers: false            # DISABLED: Prevents aggressive interpolation over breathing peaks
-    apply_filter: true
+    apply_filter: false
     filter_type: 'bandpass'           # 'bandpass', 'lowpass', 'highpass'
     lowcut: 0.05                      # Hz - lower cutoff frequency (20s breathing cycles)
     highcut: 0.5                      # Hz - upper cutoff frequency (2s breathing cycles)
