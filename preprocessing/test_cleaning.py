@@ -120,7 +120,7 @@ def test_cleaning(config_path=None, data_dir=None, output_dir=None, max_recordin
 
     # Get data directory
     if data_dir is None:
-        data_dir = Path(config['data']['data_directory'])
+        data_dir = Path(config['data']['data_dir'])
     else:
         data_dir = Path(data_dir)
 
