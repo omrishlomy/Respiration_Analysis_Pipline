@@ -71,8 +71,25 @@ data_quality:
 # ============================================================================
 features:
   peak_detection:
-    min_peak_distance_seconds: 2.0
-    min_peak_prominence: 0.01
+    min_peak_distance_seconds: 0.8       # REDUCED from 2.0 to detect double peaks (allows peaks 0.8s apart)
+    min_peak_width_seconds: 0.2          # Minimum width of a peak
+    min_peak_prominence: 0.01            # Minimum prominence relative to signal
+    percentile_peak_value: 90            # Percentile for amplitude thresholding
+    peak_value_multiplier: 0.01          # Multiplier for amplitude threshold
+    min_duration: 0.25                   # Minimum breath duration (seconds)
+    volume_threshold: 0.0                # Threshold for volume calculation
+
+  # Multi-peak detection (for detecting double/triple peaks within single breaths)
+  multi_peak:
+    upsampling_factor: 4                 # Upsampling for better precision
+    sub_peak_min_prominence: 0.1         # Sub-peak must be 10% of main peak prominence
+    sub_peak_min_amplitude_ratio: 0.2    # Sub-peak must be 20% of main peak amplitude
+    sub_peak_min_distance_sec: 0.2       # REDUCED from 0.3 to 0.2 - allows closer sub-peaks
+
+  # Breath metrics calculation
+  breath_metrics:
+    outlier_threshold_std: 3.0           # Std dev threshold for outlier removal
+    min_pause_duration: 0.05             # Minimum pause duration (seconds)
 
   aggregation:
     functions: ['mean']  # Changed from ['mean', 'std', 'cv'] to avoid feature duplication
