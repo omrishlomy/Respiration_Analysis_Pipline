@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from sklearn.metrics import roc_curve, auc, confusion_matrix
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 
 class InteractivePlotter:
@@ -109,3 +111,130 @@ class InteractivePlotter:
         fig = go.Figure(data=go.Heatmap(z=cm, colorscale='Blues', showscale=False))
         fig.update_layout(title=title, xaxis_title="Predicted", yaxis_title="True", annotations=annotations)
         fig.write_html(str(save_dir / filename))
+
+    def plot_correlation_matrix(self, X_df, outcome_name, filename="correlation_matrix.html"):
+        """Plot correlation matrix heatmap of features."""
+        save_dir = self.output_dir / "data_analysis"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Compute correlation matrix
+        corr_matrix = X_df.corr()
+
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=corr_matrix.values,
+            x=corr_matrix.columns,
+            y=corr_matrix.columns,
+            colorscale='RdBu',
+            zmid=0,
+            zmin=-1,
+            zmax=1,
+            hovertemplate='Feature 1: %{x}<br>Feature 2: %{y}<br>Correlation: %{z:.3f}<extra></extra>'
+        ))
+        fig.update_layout(
+            title=f"Feature Correlation Matrix - {outcome_name}",
+            height=800,
+            width=900
+        )
+        fig.write_html(str(save_dir / filename))
+
+    def plot_pca_2d(self, X_df, y, outcome_name, filename="pca_2d.html"):
+        """Plot 2D PCA visualization of the data."""
+        save_dir = self.output_dir / "data_analysis"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Standardize the data
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_df)
+
+        # Perform PCA
+        pca = PCA(n_components=2)
+        X_pca = pca.fit_transform(X_scaled)
+
+        # Create DataFrame for plotting
+        pca_df = pd.DataFrame({
+            'PC1': X_pca[:, 0],
+            'PC2': X_pca[:, 1],
+            'Outcome': [str(label) for label in y]
+        })
+
+        # Create scatter plot
+        fig = px.scatter(
+            pca_df,
+            x='PC1',
+            y='PC2',
+            color='Outcome',
+            title=f'PCA 2D Projection - {outcome_name}<br>Explained Variance: PC1={pca.explained_variance_ratio_[0]:.2%}, PC2={pca.explained_variance_ratio_[1]:.2%}',
+            labels={'PC1': f'PC1 ({pca.explained_variance_ratio_[0]:.2%})',
+                   'PC2': f'PC2 ({pca.explained_variance_ratio_[1]:.2%})'}
+        )
+        fig.update_traces(marker=dict(size=10, opacity=0.7))
+        fig.write_html(str(save_dir / filename))
+
+    def plot_pca_3d(self, X_df, y, outcome_name, filename="pca_3d.html"):
+        """Plot 3D PCA visualization of the data."""
+        save_dir = self.output_dir / "data_analysis"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Standardize the data
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_df)
+
+        # Perform PCA
+        pca = PCA(n_components=min(3, X_df.shape[1]))
+        X_pca = pca.fit_transform(X_scaled)
+
+        if X_pca.shape[1] < 3:
+            print(f"    ⚠️  Not enough features for 3D PCA (only {X_pca.shape[1]} components)")
+            return
+
+        # Create DataFrame for plotting
+        pca_df = pd.DataFrame({
+            'PC1': X_pca[:, 0],
+            'PC2': X_pca[:, 1],
+            'PC3': X_pca[:, 2],
+            'Outcome': [str(label) for label in y]
+        })
+
+        # Create 3D scatter plot
+        fig = px.scatter_3d(
+            pca_df,
+            x='PC1',
+            y='PC2',
+            z='PC3',
+            color='Outcome',
+            title=f'PCA 3D Projection - {outcome_name}<br>Explained Variance: PC1={pca.explained_variance_ratio_[0]:.2%}, PC2={pca.explained_variance_ratio_[1]:.2%}, PC3={pca.explained_variance_ratio_[2]:.2%}',
+            labels={'PC1': f'PC1 ({pca.explained_variance_ratio_[0]:.2%})',
+                   'PC2': f'PC2 ({pca.explained_variance_ratio_[1]:.2%})',
+                   'PC3': f'PC3 ({pca.explained_variance_ratio_[2]:.2%})'}
+        )
+        fig.update_traces(marker=dict(size=5, opacity=0.7))
+        fig.write_html(str(save_dir / filename))
+
+    def save_classifier_input_data(self, X_df, y, outcome_name, subject_ids=None, recording_dates=None):
+        """Save the cleaned data that goes into the classifier."""
+        save_dir = self.output_dir / "data_analysis"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a combined DataFrame
+        data_df = X_df.copy()
+        data_df['Outcome'] = y
+
+        if subject_ids is not None:
+            data_df.insert(0, 'SubjectID', subject_ids)
+        if recording_dates is not None:
+            data_df.insert(1, 'RecordingDate', recording_dates)
+
+        # Save to CSV
+        csv_path = save_dir / f"classifier_input_data_{outcome_name}.csv"
+        data_df.to_csv(csv_path, index=False)
+        print(f"    💾 Saved classifier input data to: {csv_path.name}")
+
+        # Create summary statistics
+        summary_stats = X_df.describe().T
+        summary_stats['feature'] = summary_stats.index
+        summary_stats = summary_stats[['feature', 'mean', 'std', 'min', '25%', '50%', '75%', 'max']]
+
+        summary_path = save_dir / f"feature_summary_stats_{outcome_name}.csv"
+        summary_stats.to_csv(summary_path, index=False)
+        print(f"    📊 Saved feature summary statistics to: {summary_path.name}")

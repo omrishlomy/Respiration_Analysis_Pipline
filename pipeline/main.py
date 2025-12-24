@@ -159,8 +159,11 @@ def main():
             # 1. Filter & Merge
             curr_labels = labels_df.copy()
             if outcome == "Recovery" and "currentConsciousness" in curr_labels.columns:
+                # Filter to only UWS subjects (currentConsciousness == 0)
                 curr_labels = curr_labels[curr_labels["currentConsciousness"] == 0]
-                print(f"    ℹ️ Recovery Filter: Using {len(curr_labels)} UWS subjects.")
+                uws_subject_ids = set(curr_labels['SubjectID'].tolist())
+                n_uws_recordings = master_features_df[master_features_df['SubjectID'].isin(uws_subject_ids)].shape[0]
+                print(f"    ℹ️ Recovery Filter: Using {len(curr_labels)} UWS subjects → {n_uws_recordings} recordings with currentConsciousness = 0")
 
             if outcome not in curr_labels.columns: continue
 
@@ -199,7 +202,10 @@ def main():
             n_unique_participants = X_df['SubjectID'].nunique() if 'SubjectID' in X_df.columns else 0
             print(f"    ✅ After merge: N = {n_recordings} recordings from {n_unique_participants} unique participants")
 
-            # Store SubjectID and RecordingDate for tracking, then remove from features
+            # Store SubjectID and RecordingDate for tracking BEFORE cleaning
+            stored_subject_ids = X_df['SubjectID'].tolist() if 'SubjectID' in X_df.columns else None
+            stored_recording_dates = X_df['RecordingDate'].tolist() if 'RecordingDate' in X_df.columns else None
+
             if 'SubjectID' in X_df.columns:
                 valid_ids = X_df['SubjectID'].tolist()
                 # Keep SubjectID for potential train/test splitting by subject
@@ -224,6 +230,16 @@ def main():
             y = np.array(y, dtype=int)
             if len(np.unique(y)) < 2: continue
 
+            # 1.5. Setup Outcome-Specific Plotter
+            plotter = InteractivePlotter(output_dir=out_dir / "plots")
+
+            # 1.6. Save and Visualize Classifier Input Data
+            print("    Saving classifier input data and creating visualizations...")
+            plotter.save_classifier_input_data(X_df, y, outcome, stored_subject_ids, stored_recording_dates)
+            plotter.plot_correlation_matrix(X_df, outcome)
+            plotter.plot_pca_2d(X_df, y, outcome)
+            plotter.plot_pca_3d(X_df, y, outcome)
+
             # 2. Stats
             print("    Running Stats...")
             stats = StatisticalAnalyzer(test=config['analysis']['statistical']['test'],
@@ -235,10 +251,7 @@ def main():
                 feat_col].tolist() if feat_col in stats_df.columns else []
             print(f"    Significant features: {len(sig_feats)}")
 
-            # 3. Setup Outcome-Specific Plotter
-            plotter = InteractivePlotter(output_dir=out_dir / "plots")
-
-            # --- NEW: Violin Plots ---
+            # 3. Plot Feature Distributions
             plotter.plot_feature_violins(X_df, y, outcome)
             plotter.plot_statistical_ranking(stats_df)
             plotter.plot_feature_distributions(X_df, y, outcome, stats_df)
