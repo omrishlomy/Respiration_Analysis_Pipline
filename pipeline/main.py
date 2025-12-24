@@ -68,6 +68,13 @@ def main():
         else:
             labels_df = labels_df.rename(columns={id_col: "SubjectID"})
         labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip()
+
+        # Debug: Show labels file structure
+        print(f"\n📋 Labels file loaded: {len(labels_df)} rows")
+        print(f"    Columns: {list(labels_df.columns)}")
+        print(f"    Unique subjects: {labels_df['SubjectID'].nunique()}")
+        print(f"    First few rows of SubjectID column: {labels_df['SubjectID'].head().tolist()}")
+
     except Exception as e:
         return print(f"❌ LABEL ERROR: {e}")
 
@@ -77,6 +84,11 @@ def main():
     loader = MATDataLoader(default_sampling_rate=data_cfg["default_sampling_rate"])
     recordings = loader.load_batch(str(data_cfg["data_dir"]))
     if not recordings: return print("❌ No recordings found.")
+
+    # Debug: Show first few recordings' IDs and dates
+    print(f"\n📁 Sample of loaded recordings:")
+    for i, rec in enumerate(recordings[:5]):
+        print(f"    {i+1}. SubjectID: '{rec.subject_id}', RecordingDate: '{rec.recording_date}'")
 
     cleaner = SignalCleaner(config)
     win_gen = WindowGenerator(WindowConfig(config['preprocessing']['windowing']['window_size'],
