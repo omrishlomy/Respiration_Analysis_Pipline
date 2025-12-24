@@ -55,7 +55,7 @@ preprocessing:
 # Only truly corrupted recordings will be rejected
 data_quality:
   enabled: true                       # Enable quality checking
-  gap_threshold: 0.0                  # Threshold for detecting gaps (values at/below this)
+  gap_threshold: -999.0               # DISABLED: Set to -999 to disable zero-value gap detection
   min_gap_duration_sec: 3.0           # Minimum gap duration to flag (was 1.0, now 3.0)
   flat_threshold: 0.05                # Threshold for detecting flat regions - RELAXED from 0.001 to 0.05
   min_flat_duration_sec: 15.0         # Minimum flat duration to flag - INCREASED from 5.0 to 15.0
