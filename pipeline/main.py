@@ -71,11 +71,57 @@ def main():
         # CRITICAL FIX: Normalize SubjectID to uppercase for case-insensitive matching
         labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip().str.upper()
 
+        # CRITICAL FIX: Add RecordingDate column from second column (date column)
+        # The date is in the second column (index 1) in format day.month.year
+        if len(labels_df.columns) > 1:
+            date_col = labels_df.columns[1]
+            print(f"    Detected date column: '{date_col}'")
+
+            # Convert date column to RecordingDate in YYYYMMDD format
+            def parse_date_to_yyyymmdd(date_str):
+                """Convert date from various formats to YYYYMMDD string."""
+                if pd.isna(date_str):
+                    return None
+                date_str = str(date_str).strip()
+
+                # Try parsing day.month.year format (e.g., "22.8.16" or "5.12.2015")
+                if '.' in date_str:
+                    parts = date_str.split('.')
+                    if len(parts) == 3:
+                        day, month, year = parts
+                        # Handle 2-digit year (assume 2000s)
+                        if len(year) == 2:
+                            year = '20' + year
+                        # Pad day and month with zeros
+                        day = day.zfill(2)
+                        month = month.zfill(2)
+                        return f"{year}{month}{day}"
+
+                # Try parsing as pandas datetime
+                try:
+                    dt = pd.to_datetime(date_str)
+                    return dt.strftime('%Y%m%d')
+                except:
+                    pass
+
+                return None
+
+            labels_df['RecordingDate'] = labels_df[date_col].apply(parse_date_to_yyyymmdd)
+
+            # Remove rows with invalid dates
+            n_before = len(labels_df)
+            labels_df = labels_df[labels_df['RecordingDate'].notna()]
+            if len(labels_df) < n_before:
+                print(f"    ⚠️  Removed {n_before - len(labels_df)} rows with invalid dates")
+
         # Debug: Show labels file structure
         print(f"\n📋 Labels file loaded: {len(labels_df)} rows")
         print(f"    Columns: {list(labels_df.columns)}")
         print(f"    Unique subjects: {labels_df['SubjectID'].nunique()}")
+        print(f"    Unique recordings (SubjectID + Date): {labels_df.groupby(['SubjectID', 'RecordingDate']).ngroups if 'RecordingDate' in labels_df.columns else 'N/A'}")
         print(f"    First few rows of SubjectID column: {labels_df['SubjectID'].head().tolist()}")
+        if 'RecordingDate' in labels_df.columns:
+            print(f"    First few RecordingDate values: {labels_df['RecordingDate'].head().tolist()}")
 
     except Exception as e:
         return print(f"❌ LABEL ERROR: {e}")
@@ -194,8 +240,9 @@ def main():
             if subjects_with_labels_no_features:
                 print(f"    ⚠️  {len(subjects_with_labels_no_features)} subjects have labels but no features: {sorted(list(subjects_with_labels_no_features))[:5]}...")
 
-            # Merge features with labels on SubjectID (one label per subject can match multiple recordings)
-            X_df, y = collection.merge_with_labels(curr_labels, on='SubjectID', outcome=outcome)
+            # Merge features with labels on BOTH SubjectID AND RecordingDate to prevent duplicates
+            # (labels file has one row per recording, so we need both to get 1:1 match)
+            X_df, y = collection.merge_with_labels(curr_labels, on='SubjectID', outcome=outcome, also_on='RecordingDate')
 
             # Debug: Print actual counts after merge
             n_recordings = len(X_df)

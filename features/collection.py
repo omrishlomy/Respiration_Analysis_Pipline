@@ -338,15 +338,17 @@ class FeatureCollection:
         self,
         labels_df: pd.DataFrame,
         on: str = 'SubjectID',
-        outcome: Optional[str] = None
+        outcome: Optional[str] = None,
+        also_on: Optional[str] = None
     ) -> Tuple[pd.DataFrame, np.ndarray]:
         """
         Merge features with labels.
 
         Args:
             labels_df: DataFrame with labels
-            on: Column to merge on
+            on: Column to merge on (e.g., 'SubjectID')
             outcome: If specified, return only this outcome's labels
+            also_on: Additional column to merge on (e.g., 'RecordingDate') to prevent duplicates
 
         Returns:
             Tuple of (merged_features_df, labels_array)
@@ -355,8 +357,14 @@ class FeatureCollection:
         features_with_ids = self.features_df.copy()
         features_with_ids[on] = self.subject_ids
 
+        # Determine merge columns
+        if also_on and also_on in features_with_ids.columns and also_on in labels_df.columns:
+            merge_on = [on, also_on]
+        else:
+            merge_on = on
+
         # Merge
-        merged = features_with_ids.merge(labels_df, on=on, how='inner')
+        merged = features_with_ids.merge(labels_df, on=merge_on, how='inner')
 
         # Extract labels
         if outcome is None:
