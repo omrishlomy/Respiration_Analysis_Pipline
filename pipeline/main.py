@@ -119,6 +119,8 @@ def main():
     if not all_subject_features: return print("❌ No features extracted.")
     master_features_df = pd.DataFrame(all_subject_features)
     master_features_df['SubjectID'] = master_features_df['SubjectID'].astype(str).str.strip()
+    if 'RecordingDate' in master_features_df.columns:
+        master_features_df['RecordingDate'] = master_features_df['RecordingDate'].astype(str).str.strip()
 
     # Debug: Show total recordings processed
     n_total_recordings = len(master_features_df)
@@ -145,15 +147,40 @@ def main():
 
             if outcome not in curr_labels.columns: continue
 
-            collection = FeatureCollection(master_features_df, subject_ids=master_features_df['SubjectID'].tolist())
+            # Separate metadata columns from features before creating FeatureCollection
+            metadata_cols = ['SubjectID', 'RecordingDate', 'N_Windows']
+            feature_cols = [col for col in master_features_df.columns if col not in metadata_cols]
+
+            # Create FeatureCollection with only feature columns, pass SubjectID separately
+            features_only_df = master_features_df[feature_cols].copy()
+            subject_ids_list = master_features_df['SubjectID'].tolist()
+
+            collection = FeatureCollection(features_only_df, subject_ids=subject_ids_list)
+
+            # Debug: Show what we have before merge
+            n_before_merge = len(features_only_df)
+            unique_subjects_in_features = set(subject_ids_list)
+            unique_subjects_in_labels = set(curr_labels['SubjectID'].astype(str).str.strip().tolist())
+
+            print(f"    📊 Before merge: {n_before_merge} recordings from {len(unique_subjects_in_features)} unique subjects")
+            print(f"    📋 Labels available for: {len(unique_subjects_in_labels)} subjects")
+
+            # Find mismatches
+            subjects_with_features_no_labels = unique_subjects_in_features - unique_subjects_in_labels
+            subjects_with_labels_no_features = unique_subjects_in_labels - unique_subjects_in_features
+
+            if subjects_with_features_no_labels:
+                print(f"    ⚠️  {len(subjects_with_features_no_labels)} subjects have features but no labels: {sorted(list(subjects_with_features_no_labels))[:5]}...")
+            if subjects_with_labels_no_features:
+                print(f"    ⚠️  {len(subjects_with_labels_no_features)} subjects have labels but no features: {sorted(list(subjects_with_labels_no_features))[:5]}...")
 
             # Merge features with labels on SubjectID (one label per subject can match multiple recordings)
             X_df, y = collection.merge_with_labels(curr_labels, on='SubjectID', outcome=outcome)
 
-            # Debug: Print actual counts
+            # Debug: Print actual counts after merge
             n_recordings = len(X_df)
             n_unique_participants = X_df['SubjectID'].nunique() if 'SubjectID' in X_df.columns else 0
-            print(f"    ℹ️ N = {n_recordings} recordings from {n_unique_participants} unique participants")
+            print(f"    ✅ After merge: N = {n_recordings} recordings from {n_unique_participants} unique participants")
 
             # Store SubjectID and RecordingDate for tracking, then remove from features
             if 'SubjectID' in X_df.columns:
