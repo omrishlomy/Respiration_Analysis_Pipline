@@ -67,7 +67,9 @@ def main():
                     break
         else:
             labels_df = labels_df.rename(columns={id_col: "SubjectID"})
-        labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip()
+
+        # CRITICAL FIX: Normalize SubjectID to uppercase for case-insensitive matching
+        labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip().str.upper()
 
         # Debug: Show labels file structure
         print(f"\n📋 Labels file loaded: {len(labels_df)} rows")
@@ -130,7 +132,10 @@ def main():
 
     if not all_subject_features: return print("❌ No features extracted.")
     master_features_df = pd.DataFrame(all_subject_features)
-    master_features_df['SubjectID'] = master_features_df['SubjectID'].astype(str).str.strip()
+
+    # CRITICAL FIX: Normalize SubjectID to uppercase for case-insensitive matching
+    master_features_df['SubjectID'] = master_features_df['SubjectID'].astype(str).str.strip().str.upper()
+
     if 'RecordingDate' in master_features_df.columns:
         master_features_df['RecordingDate'] = master_features_df['RecordingDate'].astype(str).str.strip()
 
