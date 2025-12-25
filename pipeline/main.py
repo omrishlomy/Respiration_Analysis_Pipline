@@ -249,13 +249,9 @@ def main():
 
         try:
             # 1. Filter & Merge
+            # IMPORTANT: For Recovery, we merge FIRST, then filter AFTER
+            # (filtering before merge removes matching labels)
             curr_labels = labels_df.copy()
-            if outcome == "Recovery" and "currentConsciousness" in curr_labels.columns:
-                # Filter to only UWS subjects (currentConsciousness == 0)
-                curr_labels = curr_labels[curr_labels["currentConsciousness"] == 0]
-                uws_subject_ids = set(curr_labels['SubjectID'].tolist())
-                n_uws_recordings = master_features_df[master_features_df['SubjectID'].isin(uws_subject_ids)].shape[0]
-                print(f"    ℹ️ Recovery Filter: Using {len(curr_labels)} UWS subjects → {n_uws_recordings} recordings with currentConsciousness = 0")
 
             if outcome not in curr_labels.columns: continue
 
@@ -307,6 +303,44 @@ def main():
             # Store SubjectID and RecordingDate for tracking BEFORE cleaning
             stored_subject_ids = X_df['SubjectID'].tolist() if 'SubjectID' in X_df.columns else None
             stored_recording_dates = X_df['RecordingDate'].tolist() if 'RecordingDate' in X_df.columns else None
+
+            # CRITICAL: Apply Recovery filter AFTER merge (not before)
+            # This ensures we first match recordings, then filter to UWS cases
+            if outcome == "Recovery" and "currentConsciousness" in labels_df.columns:
+                # Create index mapping for filtering
+                if 'SubjectID' in X_df.columns and 'RecordingDate' in X_df.columns:
+                    # Build a set of (SubjectID, RecordingDate) tuples for UWS recordings
+                    labels_df_indexed = labels_df.set_index(['SubjectID', 'RecordingDate'])
+
+                    # Filter to keep only rows where currentConsciousness == 0
+                    recovery_mask = []
+                    for subj_id, rec_date in zip(stored_subject_ids, stored_recording_dates):
+                        try:
+                            cc_value = labels_df_indexed.loc[(subj_id, rec_date), 'currentConsciousness']
+                            recovery_mask.append(cc_value == 0)
+                        except KeyError:
+                            # Recording not in labels (shouldn't happen after merge, but be safe)
+                            recovery_mask.append(False)
+
+                    recovery_mask = np.array(recovery_mask)
+                    n_before_filter = len(X_df)
+
+                    # Apply filter to all data
+                    X_df = X_df[recovery_mask].reset_index(drop=True)
+                    y = y[recovery_mask]
+
+                    if stored_subject_ids:
+                        stored_subject_ids = [s for i, s in enumerate(stored_subject_ids) if recovery_mask[i]]
+                    if stored_recording_dates:
+                        stored_recording_dates = [d for i, d in enumerate(stored_recording_dates) if recovery_mask[i]]
+
+                    n_after_filter = len(X_df)
+                    print(f"    ℹ️ Recovery Filter: {n_before_filter} recordings → {n_after_filter} with currentConsciousness = 0")
+
+                    # Debug: Show sample dates after filtering
+                    if stored_recording_dates:
+                        sample_dates = stored_recording_dates[:3]
+                        print(f"    📅 Sample dates after Recovery filter: {sample_dates}")
 
             if 'SubjectID' in X_df.columns:
                 valid_ids = X_df['SubjectID'].tolist()
