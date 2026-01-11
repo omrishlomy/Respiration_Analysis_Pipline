@@ -67,107 +67,11 @@ def main():
                     break
         else:
             labels_df = labels_df.rename(columns={id_col: "SubjectID"})
+        labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip()
 
-        # CRITICAL FIX: Normalize SubjectID to uppercase and take first 4 characters only
-        # (matches filename format: ABCD - date.mat, where ABCD is the 4-letter subject ID)
-        labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip().str.upper()
-
-        # Extract only first 4 characters to match filename format
-        # This handles cases like "EBEB - SLEEPY NO CNC" → "EBEB"
-        labels_df['SubjectID'] = labels_df['SubjectID'].str[:4]
-
-        # CRITICAL FIX: Auto-detect RecordingDate column
-        # Try to find a column with date-like name first, otherwise use column 2
-        date_col = None
-        date_keywords = ['date', 'recording', 'recordingdate', 'session', 'time']
-
-        print(f"    Searching for date column among: {list(labels_df.columns)}")
-
-        for col in labels_df.columns:
-            col_lower = str(col).lower().strip()
-            if any(keyword in col_lower for keyword in date_keywords):
-                date_col = col
-                print(f"    ✓ Auto-detected date column: '{date_col}' (matched keyword)")
-                break
-
-        if date_col is None and len(labels_df.columns) > 1:
-            date_col = labels_df.columns[1]
-            print(f"    Using column index 1 as date: '{date_col}'")
-
-        if date_col is not None:
-            # Convert date column to RecordingDate in YYYYMMDD format
-            def parse_date_to_yyyymmdd(date_str):
-                """Convert date from various formats to YYYYMMDD string."""
-                if pd.isna(date_str):
-                    return None
-                date_str = str(date_str).strip()
-
-                # Try parsing day.month.year format (e.g., "22.8.16" or "5.12.2015")
-                if '.' in date_str:
-                    parts = date_str.split('.')
-                    if len(parts) == 3:
-                        day, month, year = parts
-                        # Handle 2-digit year (assume 2000s)
-                        if len(year) == 2:
-                            year = '20' + year
-                        # Pad day and month with zeros
-                        day = day.zfill(2)
-                        month = month.zfill(2)
-                        return f"{year}{month}{day}"
-
-                # Try parsing slash format (e.g., "22/8/16" or "8/22/2016")
-                if '/' in date_str:
-                    parts = date_str.split('/')
-                    if len(parts) == 3:
-                        # Try day/month/year
-                        try:
-                            day, month, year = parts
-                            if len(year) == 2:
-                                year = '20' + year
-                            day = day.zfill(2)
-                            month = month.zfill(2)
-                            return f"{year}{month}{day}"
-                        except:
-                            pass
-
-                # Try parsing dash format (e.g., "2016-08-22")
-                if '-' in date_str:
-                    parts = date_str.split('-')
-                    if len(parts) == 3 and len(parts[0]) == 4:
-                        # YYYY-MM-DD format
-                        return ''.join(parts)
-
-                # Try parsing as pandas datetime (handles many formats)
-                try:
-                    dt = pd.to_datetime(date_str, dayfirst=True)  # European format default
-                    return dt.strftime('%Y%m%d')
-                except:
-                    pass
-
-                return None
-
-            labels_df['RecordingDate'] = labels_df[date_col].apply(parse_date_to_yyyymmdd)
-
-            # Debug: Show sample parsed dates to verify parsing
-            sample_original = labels_df[date_col].head(5).tolist()
-            sample_parsed = labels_df['RecordingDate'].head(5).tolist()
-            print(f"    Sample raw dates from Excel column '{date_col}': {sample_original}")
-            print(f"    Sample parsed dates (YYYYMMDD format): {sample_parsed}")
-
-            # Remove rows with invalid dates
-            n_before = len(labels_df)
-            labels_df = labels_df[labels_df['RecordingDate'].notna()]
-            if len(labels_df) < n_before:
-                print(f"    ⚠️  Removed {n_before - len(labels_df)} rows with invalid dates")
-
-        # Debug: Show labels file structure
-        print(f"\n📋 Labels file loaded: {len(labels_df)} rows")
-        print(f"    Columns: {list(labels_df.columns)}")
-        print(f"    Unique subjects: {labels_df['SubjectID'].nunique()}")
-        print(f"    Unique recordings (SubjectID + Date): {labels_df.groupby(['SubjectID', 'RecordingDate']).ngroups if 'RecordingDate' in labels_df.columns else 'N/A'}")
-        print(f"    First few rows of SubjectID column: {labels_df['SubjectID'].head().tolist()}")
-        if 'RecordingDate' in labels_df.columns:
-            print(f"    First few RecordingDate values: {labels_df['RecordingDate'].head().tolist()}")
+        # DEBUG: Show label file info
+        print(f"\n📋 Labels loaded: {len(labels_df)} subjects")
+        print(f"   Subject IDs in labels: {sorted(labels_df['SubjectID'].unique())}")
 
     except Exception as e:
         return print(f"❌ LABEL ERROR: {e}")
@@ -178,11 +82,6 @@ def main():
     loader = MATDataLoader(default_sampling_rate=data_cfg["default_sampling_rate"])
     recordings = loader.load_batch(str(data_cfg["data_dir"]))
     if not recordings: return print("❌ No recordings found.")
-
-    # Debug: Show first few recordings' IDs and dates
-    print(f"\n📁 Sample of loaded recordings:")
-    for i, rec in enumerate(recordings[:5]):
-        print(f"    {i+1}. SubjectID: '{rec.subject_id}', RecordingDate: '{rec.recording_date}'")
 
     cleaner = SignalCleaner(config)
     win_gen = WindowGenerator(WindowConfig(config['preprocessing']['windowing']['window_size'],
@@ -211,12 +110,8 @@ def main():
 
             if not rec_feats: continue
 
-            # Pass both subject_id AND recording_date to properly distinguish multiple recordings per subject
-            all_subject_features.append(aggregator.aggregate(rec_feats, subject_id=rec.subject_id, recording_date=rec.recording_date))
-
-            # Use unique recording ID to avoid overwriting when same subject has multiple recordings
-            recording_id = f"{rec.subject_id}_{rec.recording_date}"
-            feature_matrices[recording_id] = pd.DataFrame(rec_feats).set_index('WindowIndex').select_dtypes(
+            all_subject_features.append(aggregator.aggregate(rec_feats, subject_id=rec.subject_id))
+            feature_matrices[rec.subject_id] = pd.DataFrame(rec_feats).set_index('WindowIndex').select_dtypes(
                 include=[np.number])
 
         except Exception:
@@ -224,19 +119,16 @@ def main():
 
     if not all_subject_features: return print("❌ No features extracted.")
     master_features_df = pd.DataFrame(all_subject_features)
-
-    # CRITICAL FIX: Normalize SubjectID to uppercase for case-insensitive matching
-    master_features_df['SubjectID'] = master_features_df['SubjectID'].astype(str).str.strip().str.upper()
-
-    if 'RecordingDate' in master_features_df.columns:
-        master_features_df['RecordingDate'] = master_features_df['RecordingDate'].astype(str).str.strip()
-
-    # Debug: Show total recordings processed
-    n_total_recordings = len(master_features_df)
-    n_unique_subjects = master_features_df['SubjectID'].nunique()
-    print(f"\n✅ Extracted features from {n_total_recordings} recordings from {n_unique_subjects} unique subjects")
-
+    master_features_df['SubjectID'] = master_features_df['SubjectID'].astype(str).str.strip()
     master_features_df.to_csv(base_out_dir / "all_extracted_features.csv", index=False)
+
+    # DEBUG: Show extracted features info
+    print(f"\n📊 Features extracted: {len(master_features_df)} recordings")
+    print(f"   Subject IDs in features: {sorted(master_features_df['SubjectID'].unique())}")
+    print(f"   Recordings per subject:")
+    for sid in sorted(master_features_df['SubjectID'].unique()):
+        count = len(master_features_df[master_features_df['SubjectID'] == sid])
+        print(f"      - {sid}: {count} recording(s)")
 
     # --- PHASE 2: ANALYSIS ---
     print("\n[PHASE 2] Analysis Loop")
@@ -249,132 +141,26 @@ def main():
 
         try:
             # 1. Filter & Merge
-            # IMPORTANT: For Recovery, we merge FIRST, then filter AFTER
-            # (filtering before merge removes matching labels)
             curr_labels = labels_df.copy()
+            if outcome == "Recovery" and "currentConsciousness" in curr_labels.columns:
+                curr_labels = curr_labels[curr_labels["currentConsciousness"] == 0]
+                print(f"    ℹ️ Recovery Filter: Using {len(curr_labels)} UWS subjects.")
 
             if outcome not in curr_labels.columns: continue
 
-            # Separate metadata columns from features before creating FeatureCollection
-            # Keep SubjectID and RecordingDate in the DataFrame for merging (will be removed before training)
-            # Only exclude N_Windows as it's just a count
-            metadata_cols = ['N_Windows']
-            feature_cols = [col for col in master_features_df.columns if col not in metadata_cols]
-
-            # Create FeatureCollection with SubjectID and RecordingDate included
-            features_with_metadata = master_features_df[feature_cols].copy()
-            subject_ids_list = master_features_df['SubjectID'].tolist()
-
-            collection = FeatureCollection(features_with_metadata, subject_ids=subject_ids_list)
-
-            # Debug: Show what we have before merge
-            n_before_merge = len(features_with_metadata)
-            unique_subjects_in_features = set(subject_ids_list)
-            unique_subjects_in_labels = set(curr_labels['SubjectID'].astype(str).str.strip().tolist())
-
-            print(f"    📊 Before merge: {n_before_merge} recordings from {len(unique_subjects_in_features)} unique subjects")
-            print(f"    📋 Labels available for: {len(unique_subjects_in_labels)} subjects")
-
-            # Debug: Show sample RecordingDate values to verify they match
-            if 'RecordingDate' in features_with_metadata.columns and 'RecordingDate' in curr_labels.columns:
-                sample_dates_features = features_with_metadata['RecordingDate'].head(3).tolist()
-                sample_dates_labels = curr_labels['RecordingDate'].head(3).tolist()
-                print(f"    📅 Sample dates in features: {sample_dates_features}")
-                print(f"    📅 Sample dates in labels: {sample_dates_labels}")
-
-            # Find mismatches
-            subjects_with_features_no_labels = unique_subjects_in_features - unique_subjects_in_labels
-            subjects_with_labels_no_features = unique_subjects_in_labels - unique_subjects_in_features
-
-            if subjects_with_features_no_labels:
-                print(f"    ⚠️  {len(subjects_with_features_no_labels)} subjects have features but no labels: {sorted(list(subjects_with_features_no_labels))[:5]}...")
-            if subjects_with_labels_no_features:
-                print(f"    ⚠️  {len(subjects_with_labels_no_features)} subjects have labels but no features: {sorted(list(subjects_with_labels_no_features))[:5]}...")
-
-            # Merge features with labels on BOTH SubjectID AND RecordingDate to prevent duplicates
-            # (labels file has one row per recording, so we need both to get 1:1 match)
-            X_df, y = collection.merge_with_labels(curr_labels, on='SubjectID', outcome=outcome, also_on='RecordingDate')
-
-            # Debug: Print actual counts after merge
-            n_recordings = len(X_df)
-            n_unique_participants = X_df['SubjectID'].nunique() if 'SubjectID' in X_df.columns else 0
-            print(f"    ✅ After merge: N = {n_recordings} recordings from {n_unique_participants} unique participants")
-
-            # Store SubjectID and RecordingDate for tracking BEFORE cleaning
-            stored_subject_ids = X_df['SubjectID'].tolist() if 'SubjectID' in X_df.columns else None
-            stored_recording_dates = X_df['RecordingDate'].tolist() if 'RecordingDate' in X_df.columns else None
-
-            # CRITICAL: Apply Recovery filter AFTER merge (not before)
-            # This ensures we first match recordings, then filter to UWS cases
-            if outcome == "Recovery" and "currentConsciousness" in labels_df.columns:
-                # Create index mapping for filtering
-                if 'SubjectID' in X_df.columns and 'RecordingDate' in X_df.columns:
-                    # Build a set of (SubjectID, RecordingDate) tuples for UWS recordings
-                    labels_df_indexed = labels_df.set_index(['SubjectID', 'RecordingDate'])
-
-                    # Filter to keep only rows where currentConsciousness == 0
-                    recovery_mask = []
-                    for subj_id, rec_date in zip(stored_subject_ids, stored_recording_dates):
-                        try:
-                            cc_value = labels_df_indexed.loc[(subj_id, rec_date), 'currentConsciousness']
-                            recovery_mask.append(cc_value == 0)
-                        except KeyError:
-                            # Recording not in labels (shouldn't happen after merge, but be safe)
-                            recovery_mask.append(False)
-
-                    recovery_mask = np.array(recovery_mask)
-                    n_before_filter = len(X_df)
-
-                    # Apply filter to all data
-                    X_df = X_df[recovery_mask].reset_index(drop=True)
-                    y = y[recovery_mask]
-
-                    if stored_subject_ids:
-                        stored_subject_ids = [s for i, s in enumerate(stored_subject_ids) if recovery_mask[i]]
-                    if stored_recording_dates:
-                        stored_recording_dates = [d for i, d in enumerate(stored_recording_dates) if recovery_mask[i]]
-
-                    n_after_filter = len(X_df)
-                    print(f"    ℹ️ Recovery Filter: {n_before_filter} recordings → {n_after_filter} with currentConsciousness = 0")
-
-                    # Debug: Show sample dates after filtering
-                    if stored_recording_dates:
-                        sample_dates = stored_recording_dates[:3]
-                        print(f"    📅 Sample dates after Recovery filter: {sample_dates}")
+            collection = FeatureCollection(master_features_df, subject_ids=master_features_df['SubjectID'].tolist())
+            X_df, y = collection.merge_with_labels(curr_labels, on='SubjectID', outcome=outcome)
 
             if 'SubjectID' in X_df.columns:
                 valid_ids = X_df['SubjectID'].tolist()
-                # Keep SubjectID for potential train/test splitting by subject
-                # But don't use it as a feature for training
+                X_df = X_df.set_index('SubjectID')
             else:
                 valid_ids = []
 
-            # Clean and handle NaN values more robustly
-            X_df = X_df.select_dtypes(include=[np.number])
-
-            # Replace infinite values with NaN first
-            X_df = X_df.replace([np.inf, -np.inf], np.nan)
-
-            # Fill NaN values with 0 (or could use median/mean imputation)
-            X_df = X_df.fillna(0)
-
-            # Verify no NaN or inf values remain
-            if X_df.isnull().any().any():
-                print(f"    ⚠️ WARNING: NaN values still present after cleaning!")
-                X_df = X_df.fillna(0)  # Extra safety
-
+            # Clean
+            X_df = X_df.select_dtypes(include=[np.number]).fillna(0)
             y = np.array(y, dtype=int)
             if len(np.unique(y)) < 2: continue
-
-            # 1.5. Setup Outcome-Specific Plotter
-            plotter = InteractivePlotter(output_dir=out_dir / "plots")
-
-            # 1.6. Save and Visualize Classifier Input Data
-            print("    Saving classifier input data and creating visualizations...")
-            plotter.save_classifier_input_data(X_df, y, outcome, stored_subject_ids, stored_recording_dates)
-            plotter.plot_correlation_matrix(X_df, outcome)
-            plotter.plot_pca_2d(X_df, y, outcome)
-            plotter.plot_pca_3d(X_df, y, outcome)
 
             # 2. Stats
             print("    Running Stats...")
@@ -387,7 +173,10 @@ def main():
                 feat_col].tolist() if feat_col in stats_df.columns else []
             print(f"    Significant features: {len(sig_feats)}")
 
-            # 3. Plot Feature Distributions
+            # 3. Setup Outcome-Specific Plotter
+            plotter = InteractivePlotter(output_dir=out_dir / "plots")
+
+            # --- NEW: Violin Plots ---
             plotter.plot_feature_violins(X_df, y, outcome)
             plotter.plot_statistical_ranking(stats_df)
             plotter.plot_feature_distributions(X_df, y, outcome, stats_df)
@@ -400,7 +189,7 @@ def main():
 
             # 5. Run Models
             exp_manager = ExperimentManager(config)
-            results_df, _ = exp_manager.run_experiments(X_df, y, sig_feats, plotter=plotter, subject_ids=stored_subject_ids)
+            results_df, _ = exp_manager.run_experiments(X_df, y, sig_feats, plotter=plotter)
 
             # 6. Export
             exporter = ExcelExporter(filepath=str(out_dir / f"REPORT_{outcome}.xlsx"))

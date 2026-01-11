@@ -357,6 +357,18 @@ class FeatureCollection:
         features_with_ids = self.features_df.copy()
         features_with_ids[on] = self.subject_ids
 
+        # DEBUG: Identify which subject IDs are missing labels
+        feature_subject_ids = set(features_with_ids[on].unique())
+        label_subject_ids = set(labels_df[on].unique()) if on in labels_df.columns else set()
+
+        missing_in_labels = feature_subject_ids - label_subject_ids
+        if missing_in_labels:
+            print(f"\n⚠️  WARNING: {len(missing_in_labels)} subject ID(s) in features have NO labels:")
+            for sid in sorted(missing_in_labels):
+                count = len(features_with_ids[features_with_ids[on] == sid])
+                print(f"    - {repr(sid)}: {count} recording(s)")
+            print(f"    These {sum(len(features_with_ids[features_with_ids[on] == sid]) for sid in missing_in_labels)} recordings will be EXCLUDED from analysis!\n")
+
         # Determine merge columns
         if also_on and also_on in features_with_ids.columns and also_on in labels_df.columns:
             merge_on = [on, also_on]
