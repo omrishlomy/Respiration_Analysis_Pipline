@@ -33,14 +33,18 @@ pipeline/          - Main orchestration (main.py)
    - Solution: Collect predictions from LORO, LOSO, and incremental feature experiments
    - Files: `models/experiment.py`, `visualization/interactive.py`
 
-2. ✅ Fixed feature comparison plots not regenerating
+2. ✅ Fixed feature comparison plots not regenerating (Commit: 7b33348)
    - Issue: `merge_with_features()` expected single outcome (string), but script passed list
    - Solution: Added `add_labels_to_features()` method for visualization pipelines
    - Files: `data/clinical_labels.py`
+   - Action Required: User needs to update `run_features_layer.py` line 258
 
 **Known Issues:**
-- Feature layer comparison plots show old data (need to update run_features_layer.py)
-- User needs to change line 258: `merge_with_features` → `add_labels_to_features`
+- ⚠️ User's local `run_features_layer.py` needs manual update
+  - Details: Line 258 calls `merge_with_features()` but should call `add_labels_to_features()`
+  - Impact: Comparison plots not regenerating with current data
+  - Fix: Change `labels.merge_with_features(...)` → `labels.add_labels_to_features(...)`
+  - File: `features/run_features_layer.py` (local untracked file)
 
 ## Running the Pipeline
 
@@ -83,6 +87,64 @@ To continue this work in a new session:
 1. Use `claude --continue` or `claude --resume`
 2. Or provide context: "Continuing work on ROC comparison plots"
 3. This file preserves project context automatically
+
+---
+
+## Instructions for Claude (Auto-Maintenance)
+
+**IMPORTANT: Claude should automatically update this file during sessions to keep it current.**
+
+### When to Add Issues to "Known Issues":
+
+Add a new issue when:
+- ✅ User reports a bug or problem
+- ✅ Tests fail or code doesn't work as expected
+- ✅ You discover an issue while working on code
+- ✅ User mentions something isn't working correctly
+- ✅ Error messages or warnings appear during execution
+
+**Format:**
+```
+- [Short description] (affected file/module)
+  - Details: [what's wrong]
+  - Impact: [how it affects users]
+```
+
+### When to Remove/Update Issues from "Known Issues":
+
+Remove an issue when:
+- ✅ The fix is committed and pushed
+- ✅ Tests pass confirming the fix works
+- ✅ User confirms the issue is resolved
+
+Move to "Recent Fixes" when:
+- ✅ Issue is fully resolved
+- ✅ Add the commit hash or branch where it was fixed
+
+**Update Process:**
+1. When you fix an issue, immediately update this file
+2. Move the issue from "Known Issues" to "Recent Fixes"
+3. Add solution details and affected files
+4. Commit the CLAUDE.md update with your fix
+
+### When to Update "Current Work":
+
+Update when:
+- ✅ Starting work on a new feature or fix
+- ✅ Switching to a new branch
+- ✅ Completing a major milestone
+- ✅ User provides new requirements or changes direction
+
+### General Maintenance:
+
+- Keep "Recent Fixes" to last 5-7 items (move older ones to git history)
+- Update "Important Notes" when significant architectural decisions are made
+- Add new files to "Key Files" when they become central to the project
+- Update branch name in "Current Work" when switching branches
+
+**Proactive Updates:** Don't wait for the user to ask - update this file automatically whenever you make significant changes!
+
+---
 
 ## Contact
 
