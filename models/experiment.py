@@ -35,6 +35,7 @@ class ExperimentManager:
         """
         all_features = X_df.columns.tolist()
         results_list = []
+        predictions = {}  # Collect predictions for comparison plots
 
         classes, counts = np.unique(y, return_counts=True)
         n_recordings = len(y)
@@ -48,8 +49,10 @@ class ExperimentManager:
             top_n = self.model_cfg.get('loso', {}).get('top_n_features', 6)
             loro_features = significant_features_list[:top_n] if len(significant_features_list) >= top_n else significant_features_list
 
-            loro_results = self._run_loro_cv(X_df, y, loro_features, subject_ids)
+            loro_results, loro_preds = self._run_loro_cv(X_df, y, loro_features, subject_ids)
             results_list.extend(loro_results)
+            if loro_preds is not None:
+                predictions['LORO'] = loro_preds
 
         # --- 2. LOSO Cross-Validation (if enabled) ---
         if self.model_cfg.get('loso', {}).get('enabled', False) and subject_ids is not None:
@@ -59,16 +62,23 @@ class ExperimentManager:
             top_n = self.model_cfg.get('loso', {}).get('top_n_features', 6)
             loso_features = significant_features_list[:top_n] if len(significant_features_list) >= top_n else significant_features_list
 
-            loso_results = self._run_loso_cv(X_df, y, loso_features, subject_ids)
+            loso_results, loso_preds = self._run_loso_cv(X_df, y, loso_features, subject_ids)
             results_list.extend(loso_results)
+            if loso_preds is not None:
+                predictions['LOSO'] = loso_preds
 
         # --- 3. Incremental Feature Training (2, 4, 6, 8, ... features) ---
         if significant_features_list:
             print(f"    Running Incremental Feature Training...")
-            incremental_results = self._run_incremental_features(X_df, y, significant_features_list, plotter)
+            incremental_results, incr_preds = self._run_incremental_features(X_df, y, significant_features_list, plotter)
             results_list.extend(incremental_results)
+            predictions.update(incr_preds)
 
-        return pd.DataFrame(results_list), {}
+        # --- 4. Create Comparison ROC Plot ---
+        if plotter:
+            plotter.plot_comparison_roc(predictions, y, filename="ROC_Comparison_All_Experiments.html")
+
+        return pd.DataFrame(results_list), predictions
 
     def _run_loro_cv(self, X_df, y, feature_subset, subject_ids):
         """Run Leave-One-Recording-Out cross-validation."""
@@ -156,7 +166,10 @@ class ExperimentManager:
                 'AUC': auc
             })
 
-        return results
+            # Return predictions for ROC comparison plot
+            return results, all_y_prob
+        else:
+            return results, None
 
     def _run_loso_cv(self, X_df, y, feature_subset, subject_ids):
         """Run Leave-One-Subject-Out cross-validation."""
@@ -244,11 +257,15 @@ class ExperimentManager:
                 'AUC': auc
             })
 
-        return results
+            # Return predictions for ROC comparison plot
+            return results, all_y_prob
+        else:
+            return results, None
 
     def _run_incremental_features(self, X_df, y, significant_features, plotter):
         """Train with incremental number of features: 2, 4, 6, 8, ..."""
         results = []
+        predictions = {}  # Collect predictions for each feature count
 
         # Generate feature counts: 2, 4, 6, 8, ... up to all significant features
         n_significant = len(significant_features)
@@ -279,7 +296,14 @@ class ExperimentManager:
                 best_model, best_params = tuner.tune(clf, X_train, y_train, self.model_cfg['tuning']['svm'])
                 best_model.train(X_train, y_train)
 
-                # Predict
+                # Predict on full dataset for ROC comparison
+                y_prob_full = best_model.predict_proba(X_sub)
+
+                # Store predictions for this experiment
+                experiment_name = f'Top {n_features} Features'
+                predictions[experiment_name] = y_prob_full
+
+                # Predict on test set for metrics
                 y_pred = best_model.predict(X_test)
                 y_prob = best_model.predict_proba(X_test)
 
@@ -304,7 +328,7 @@ class ExperimentManager:
                     auc = np.nan
 
                 results.append({
-                    'Experiment': f'Top {n_features} Features',
+                    'Experiment': experiment_name,
                     'Dimension': n_features,
                     'Features_Used': ", ".join(feature_subset),
                     'Hyperparameters': str(best_params),
@@ -320,4 +344,4 @@ class ExperimentManager:
                 print(f"        Top {n_features} features failed: {e}")
                 continue
 
-        return results
+        return results, predictions

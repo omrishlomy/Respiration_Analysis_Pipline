@@ -89,14 +89,28 @@ class InteractivePlotter:
     def plot_comparison_roc(self, model_predictions, y_true, filename="ROC_Comparison.html"):
         fig = go.Figure()
         fig.add_shape(type='line', line=dict(dash='dash', color='gray'), x0=0, x1=1, y0=0, y1=1)
+
+        traces_added = 0
         for name, y_prob in model_predictions.items():
             try:
                 score = y_prob[:, 1] if y_prob.ndim > 1 else y_prob
                 fpr, tpr, _ = roc_curve(y_true, score)
                 roc_auc = auc(fpr, tpr)
                 fig.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name=f'{name} (AUC={roc_auc:.2f})'))
-            except:
+                traces_added += 1
+            except (ValueError, IndexError, AttributeError) as e:
+                # Skip models with invalid predictions or incompatible format
                 continue
+
+        # Add annotation if no valid predictions were plotted
+        if traces_added == 0:
+            fig.add_annotation(
+                text="No valid model predictions available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=20, color="red")
+            )
+
         fig.update_layout(title="ROC Comparison", xaxis_title="FPR", yaxis_title="TPR")
         fig.write_html(str(self.output_dir / filename))
 
