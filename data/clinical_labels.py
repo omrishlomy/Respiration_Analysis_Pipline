@@ -374,6 +374,18 @@ class ClinicalLabels:
         # Select only subject ID and outcome columns
         labels_subset = labels_temp[[self.subject_id_column, outcome]]
 
+        # DEBUG: Identify which subject IDs are missing labels
+        feature_subject_ids = set(features_df[on].unique()) if on in features_df.columns else set()
+        label_subject_ids = set(labels_subset[on].unique()) if on in labels_subset.columns else set()
+
+        missing_in_labels = feature_subject_ids - label_subject_ids
+        if missing_in_labels:
+            print(f"\n⚠️  WARNING: {len(missing_in_labels)} subject ID(s) in features have NO labels for outcome '{outcome}':")
+            for sid in sorted(missing_in_labels):
+                count = len(features_df[features_df[on] == sid])
+                print(f"    - {repr(sid)}: {count} recording(s)")
+            print(f"    These {sum(len(features_df[features_df[on] == sid]) for sid in missing_in_labels)} recordings will be EXCLUDED from analysis!\n")
+
         # Merge
         merged = features_df.merge(labels_subset, on=on, how='inner')
 
