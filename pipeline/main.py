@@ -68,6 +68,11 @@ def main():
         else:
             labels_df = labels_df.rename(columns={id_col: "SubjectID"})
         labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip()
+
+        # DEBUG: Show label file info
+        print(f"\n📋 Labels loaded: {len(labels_df)} subjects")
+        print(f"   Subject IDs in labels: {sorted(labels_df['SubjectID'].unique())}")
+
     except Exception as e:
         return print(f"❌ LABEL ERROR: {e}")
 
@@ -116,6 +121,14 @@ def main():
     master_features_df = pd.DataFrame(all_subject_features)
     master_features_df['SubjectID'] = master_features_df['SubjectID'].astype(str).str.strip()
     master_features_df.to_csv(base_out_dir / "all_extracted_features.csv", index=False)
+
+    # DEBUG: Show extracted features info
+    print(f"\n📊 Features extracted: {len(master_features_df)} recordings")
+    print(f"   Subject IDs in features: {sorted(master_features_df['SubjectID'].unique())}")
+    print(f"   Recordings per subject:")
+    for sid in sorted(master_features_df['SubjectID'].unique()):
+        count = len(master_features_df[master_features_df['SubjectID'] == sid])
+        print(f"      - {sid}: {count} recording(s)")
 
     # --- PHASE 2: ANALYSIS ---
     print("\n[PHASE 2] Analysis Loop")
