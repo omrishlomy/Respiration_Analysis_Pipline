@@ -83,7 +83,7 @@ class ExperimentManager:
                 import traceback
                 traceback.print_exc()
 
-        if plotter and predictions:
+        if plotter:
             plotter.plot_comparison_roc(predictions, y, filename="ROC_Comparison_All_Experiments.html")
 
         return pd.DataFrame(results_list), predictions
