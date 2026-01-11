@@ -19,6 +19,7 @@ from scipy.signal import find_peaks
 from scipy.ndimage import label
 from scipy.interpolate import interp1d
 from dataclasses import dataclass, field
+import bisect  # For optimized pause calculation
 
 
 @dataclass
@@ -747,26 +748,37 @@ class BreathingParameterExtractor:
         exhales: List[BreathPeak],
         pause_type: str
     ) -> List[float]:
-        """Calculate pauses between breathing phases."""
+        """Calculate pauses between breathing phases. OPTIMIZED: O(n) instead of O(n²)"""
         pauses = []
 
         if pause_type == 'post_inhale':
             # Pause after inhale = start of next exhale - end of inhale
+            # OPTIMIZATION: Sort exhales once by StartTime, then use binary search
+            sorted_exhales = sorted(exhales, key=lambda e: e.StartTime)
+
             for inhale in inhales:
                 inhale_end = inhale.StartTime + inhale.Duration
-                next_exhales = [e for e in exhales if e.StartTime > inhale_end]
-                if len(next_exhales) > 0:
-                    next_exhale = min(next_exhales, key=lambda e: e.StartTime)
+                # Binary search for first exhale after inhale_end
+                # Use bisect for O(log n) instead of O(n) linear search
+                idx = bisect.bisect_left([e.StartTime for e in sorted_exhales], inhale_end)
+
+                if idx < len(sorted_exhales):
+                    next_exhale = sorted_exhales[idx]
                     pause = next_exhale.StartTime - inhale_end
                     if pause >= self.min_pause_duration:
                         pauses.append(pause)
         else:
             # Pause after exhale = start of next inhale - end of exhale
+            # OPTIMIZATION: Sort inhales once by StartTime
+            sorted_inhales = sorted(inhales, key=lambda i: i.StartTime)
+
             for exhale in exhales:
                 exhale_end = exhale.StartTime + exhale.Duration
-                next_inhales = [i for i in inhales if i.StartTime > exhale_end]
-                if len(next_inhales) > 0:
-                    next_inhale = min(next_inhales, key=lambda i: i.StartTime)
+                # Binary search for first inhale after exhale_end
+                idx = bisect.bisect_left([i.StartTime for i in sorted_inhales], exhale_end)
+
+                if idx < len(sorted_inhales):
+                    next_inhale = sorted_inhales[idx]
                     pause = next_inhale.StartTime - exhale_end
                     if pause >= self.min_pause_duration:
                         pauses.append(pause)
