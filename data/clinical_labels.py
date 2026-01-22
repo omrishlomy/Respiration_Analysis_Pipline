@@ -451,16 +451,26 @@ class ClinicalLabels:
         if filter_recovery and 'Recovery' in available_labels:
             labels_subset = labels_subset[labels_subset['Recovery'] == 1].copy()
 
+        # Normalize SubjectIDs to handle whitespace and case differences
+        # Create temporary normalized columns for merging
+        features_df_normalized = features_df.copy()
+        labels_subset_normalized = labels_subset.copy()
+
+        features_df_normalized['_normalized_id'] = features_df_normalized[on].astype(str).str.strip().str.upper()
+        labels_subset_normalized['_normalized_id'] = labels_subset_normalized[self.subject_id_column].astype(str).str.strip().str.upper()
+
         # Merge (LEFT JOIN - keep all features, add labels where available)
-        merged = features_df.merge(
-            labels_subset,
-            left_on=on,
-            right_on=self.subject_id_column,
-            how='left'
+        merged = features_df_normalized.merge(
+            labels_subset_normalized,
+            left_on='_normalized_id',
+            right_on='_normalized_id',
+            how='left',
+            suffixes=('', '_labels')
         )
 
-        # Drop duplicate subject ID column if it was created
-        if self.subject_id_column != on and self.subject_id_column in merged.columns:
+        # Drop the temporary normalized column and duplicate subject ID columns
+        merged = merged.drop(columns=['_normalized_id'])
+        if self.subject_id_column in merged.columns and self.subject_id_column != on:
             merged = merged.drop(columns=[self.subject_id_column])
 
         return merged

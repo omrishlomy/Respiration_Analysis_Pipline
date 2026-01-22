@@ -28,23 +28,24 @@ pipeline/          - Main orchestration (main.py)
 **Branch:** `claude/add-roc-comparison-plots-pHWPk`
 
 **Recent Fixes:**
-1. ✅ Fixed ROC comparison plots not being created
+1. ✅ Fixed missing labels in feature comparison plots
+   - Issue: SubjectID mismatch due to trailing spaces in Excel file (`'ABOU '` vs `'ABOU'`)
+   - Solution: Added SubjectID normalization (strip whitespace, uppercase) in `add_labels_to_features()`
+   - Impact: All labels now merge correctly regardless of whitespace or case differences
+   - Files: `data/clinical_labels.py` (lines 454-474)
+
+2. ✅ Fixed ROC comparison plots not being created
    - Issue: `run_experiments()` returned empty predictions dict
    - Solution: Collect predictions from LORO, LOSO, and incremental feature experiments
    - Files: `models/experiment.py`, `visualization/interactive.py`
 
-2. ✅ Fixed feature comparison plots not regenerating (Commit: 7b33348)
+3. ✅ Fixed feature comparison plots not regenerating (Commit: 7b33348)
    - Issue: `merge_with_features()` expected single outcome (string), but script passed list
    - Solution: Added `add_labels_to_features()` method for visualization pipelines
    - Files: `data/clinical_labels.py`
-   - Action Required: User needs to update `run_features_layer.py` line 258
 
 **Known Issues:**
-- ⚠️ User's local `run_features_layer.py` needs manual update
-  - Details: Line 258 calls `merge_with_features()` but should call `add_labels_to_features()`
-  - Impact: Comparison plots not regenerating with current data
-  - Fix: Change `labels.merge_with_features(...)` → `labels.add_labels_to_features(...)`
-  - File: `features/run_features_layer.py` (local untracked file)
+- None currently
 
 ## Running the Pipeline
 
