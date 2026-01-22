@@ -68,13 +68,23 @@ def main():
         else:
             labels_df = labels_df.rename(columns={id_col: "SubjectID"})
 
-        # CRITICAL FIX: Normalize SubjectID to uppercase and take first 4 characters only
-        # (matches filename format: ABCD - date.mat, where ABCD is the 4-letter subject ID)
-        labels_df['SubjectID'] = labels_df['SubjectID'].astype(str).str.strip().str.upper()
+        # CRITICAL FIX: Normalize SubjectID to match filename format
+        # Handles: case sensitivity, spaces, underscores, hyphens
+        # Examples: "Abou" → "ABOU", "AB_OU" → "ABOU", "ab ou" → "ABOU"
+        def normalize_subject_id(subject_id):
+            if pd.isna(subject_id):
+                return subject_id
+            sid = str(subject_id).strip()
+            # Remove common separators
+            sid = sid.replace('_', '').replace('-', '').replace(' ', '')
+            # Convert to uppercase
+            sid = sid.upper()
+            # Take first 4 characters (standard subject ID length)
+            if len(sid) >= 4:
+                sid = sid[:4]
+            return sid
 
-        # Extract only first 4 characters to match filename format
-        # This handles cases like "EBEB - SLEEPY NO CNC" → "EBEB"
-        labels_df['SubjectID'] = labels_df['SubjectID'].str[:4]
+        labels_df['SubjectID'] = labels_df['SubjectID'].apply(normalize_subject_id)
 
         # CRITICAL FIX: Auto-detect RecordingDate column
         # Try to find a column with date-like name first, otherwise use column 2

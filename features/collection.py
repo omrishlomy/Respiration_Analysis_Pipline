@@ -353,18 +353,77 @@ class FeatureCollection:
         Returns:
             Tuple of (merged_features_df, labels_array)
         """
+        # CRITICAL: Normalize SubjectID for robust matching
+        # This handles case sensitivity, spaces, underscores, and ensures 4-char format
+        def normalize_subject_id(subject_id):
+            """
+            Normalize subject ID to match filename format:
+            - Remove spaces, underscores, hyphens
+            - Convert to uppercase
+            - Take first 4 characters
+
+            Examples:
+            - "Abou" → "ABOU"
+            - "AB_OU" → "ABOU"
+            - "ab ou" → "ABOU"
+            - "ABOUB" → "ABOU"
+            """
+            if pd.isna(subject_id):
+                return subject_id
+
+            # Convert to string and strip whitespace
+            sid = str(subject_id).strip()
+
+            # Remove common separators
+            sid = sid.replace('_', '').replace('-', '').replace(' ', '')
+
+            # Convert to uppercase
+            sid = sid.upper()
+
+            # Take first 4 characters (standard subject ID length)
+            if len(sid) >= 4:
+                sid = sid[:4]
+
+            return sid
+
         # Add subject IDs to features for merging
         features_with_ids = self.features_df.copy()
         features_with_ids[on] = self.subject_ids
 
+        # Normalize SubjectID in both features and labels
+        features_with_ids[on] = features_with_ids[on].apply(normalize_subject_id)
+
+        # Make a copy of labels to avoid modifying original
+        labels_normalized = labels_df.copy()
+        labels_normalized[on] = labels_normalized[on].apply(normalize_subject_id)
+
+        # Debug output to help diagnose mismatches
+        unique_features_ids = set(features_with_ids[on].dropna().unique())
+        unique_labels_ids = set(labels_normalized[on].dropna().unique())
+
+        ids_in_features_not_labels = unique_features_ids - unique_labels_ids
+        ids_in_labels_not_features = unique_labels_ids - unique_features_ids
+
+        if ids_in_features_not_labels:
+            warnings.warn(
+                f"⚠️  {len(ids_in_features_not_labels)} subject IDs in features have no labels: "
+                f"{sorted(list(ids_in_features_not_labels))[:10]}..."
+            )
+
+        if ids_in_labels_not_features:
+            warnings.warn(
+                f"⚠️  {len(ids_in_labels_not_features)} subject IDs in labels have no features: "
+                f"{sorted(list(ids_in_labels_not_features))[:10]}..."
+            )
+
         # Determine merge columns
-        if also_on and also_on in features_with_ids.columns and also_on in labels_df.columns:
+        if also_on and also_on in features_with_ids.columns and also_on in labels_normalized.columns:
             merge_on = [on, also_on]
         else:
             merge_on = on
 
         # Merge
-        merged = features_with_ids.merge(labels_df, on=merge_on, how='inner')
+        merged = features_with_ids.merge(labels_normalized, on=merge_on, how='inner')
 
         # Extract labels
         if outcome is None:

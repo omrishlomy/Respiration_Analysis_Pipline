@@ -62,21 +62,38 @@ class DataLoader(ABC):
         Extract subject ID from filename.
 
         Override this method if your naming convention is different.
-        Default: extracts first 4 characters
+        Default: extracts first 4 characters, normalized
 
         Args:
             filename: Filename (without path)
 
         Returns:
-            Subject ID (4-letter code)
+            Subject ID (4-letter code, uppercase, no separators)
+
+        Examples:
+            "ABOU - 22.8.16.mat" → "ABOU"
+            "AB_OU - 22.8.16.mat" → "ABOU"
+            "ab-ou - 22.8.16.mat" → "ABOU"
         """
-        # Remove extension and get first 4 characters
+        # Remove extension and get base name
         base_name = Path(filename).stem
-        if len(base_name) >= 4:
-            return base_name[:4].upper()
+
+        # Extract subject ID (everything before first space or dash)
+        # This handles "ABOU - 22.8.16" format
+        subject_id = base_name.split(' ')[0].split('-')[0]
+
+        # Remove any remaining separators
+        subject_id = subject_id.replace('_', '').replace('-', '').replace(' ', '')
+
+        # Convert to uppercase
+        subject_id = subject_id.upper()
+
+        # Take first 4 characters
+        if len(subject_id) >= 4:
+            return subject_id[:4]
         else:
             warnings.warn(f"Filename '{filename}' too short to extract 4-letter subject ID")
-            return base_name.upper()
+            return subject_id
 
 
 class MATDataLoader(DataLoader):
