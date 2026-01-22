@@ -426,7 +426,7 @@ class ClinicalLabels:
             label_columns: List of label column names to add
             on: Column name to merge on
             filter_recovery: If True, exclude recordings with Recovery != 1 (legacy parameter)
-            debug: If True, print detailed merge information
+            debug: If True, print detailed merge information (deprecated - kept for compatibility)
 
         Returns:
             DataFrame with label columns added (NaN for recordings without labels)
@@ -449,31 +449,7 @@ class ClinicalLabels:
 
         # Optional: Filter out recordings with Recovery != 1
         if filter_recovery and 'Recovery' in available_labels:
-            n_before = len(labels_subset)
             labels_subset = labels_subset[labels_subset['Recovery'] == 1].copy()
-            n_after = len(labels_subset)
-            if debug:
-                print(f"  Filter Recovery=1: {n_before} → {n_after} labels ({n_before - n_after} excluded)")
-
-        # DEBUG: Show merge statistics
-        if debug:
-            feature_subject_ids = set(features_df[on].unique())
-            label_subject_ids = set(labels_subset[self.subject_id_column].unique())
-
-            missing_in_labels = feature_subject_ids - label_subject_ids
-            missing_in_features = label_subject_ids - feature_subject_ids
-
-            print(f"\n  Merge statistics:")
-            print(f"    Features: {len(feature_subject_ids)} unique subjects, {len(features_df)} recordings")
-            print(f"    Labels: {len(label_subject_ids)} unique subjects")
-            print(f"    Missing in labels: {len(missing_in_labels)} subjects")
-            if missing_in_labels:
-                for sid in sorted(list(missing_in_labels)[:5]):
-                    count = len(features_df[features_df[on] == sid])
-                    print(f"      - {repr(sid)}: {count} recording(s)")
-                if len(missing_in_labels) > 5:
-                    print(f"      ... and {len(missing_in_labels) - 5} more")
-            print(f"    Missing in features: {len(missing_in_features)} subjects")
 
         # Merge (LEFT JOIN - keep all features, add labels where available)
         merged = features_df.merge(
@@ -486,12 +462,6 @@ class ClinicalLabels:
         # Drop duplicate subject ID column if it was created
         if self.subject_id_column != on and self.subject_id_column in merged.columns:
             merged = merged.drop(columns=[self.subject_id_column])
-
-        if debug:
-            for col in available_labels:
-                n_valid = merged[col].notna().sum()
-                n_missing = merged[col].isna().sum()
-                print(f"    {col}: {n_valid} valid, {n_missing} missing")
 
         return merged
 
