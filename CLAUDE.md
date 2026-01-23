@@ -11,6 +11,37 @@ Machine learning pipeline for analyzing respiratory recordings to predict clinic
 - Statistical analysis and ML classification
 - ROC curve comparisons across models
 
+## CRITICAL REQUIREMENTS - DO NOT CHANGE
+
+**Feature Comparison Plot Format (MUST ALWAYS BE 3 SUBPLOTS):**
+
+⚠️ **NEVER create single combined plots. ALWAYS create 3 side-by-side subplots.**
+
+For EACH feature being plotted, create exactly 3 subplots showing:
+1. **Left subplot**: Feature values by Recovery label (Recovery=0 vs Recovery=1 vs Missing)
+   - Filter: Only include recordings where `currentConsciousness==0`
+   - Rationale: Recovery only applies to patients starting at consciousness level 0
+2. **Middle subplot**: Feature values by currentConsciousness label (0 vs 1 vs Missing)
+   - No filtering - include all recordings
+3. **Right subplot**: Feature values by Survival label (Survival=0 vs Survival=1 vs Missing)
+   - No filtering - include all recordings
+
+**Plot Layout:**
+- Use matplotlib's `fig, axes = plt.subplots(1, 3, figsize=(width, 5))`
+- Each subplot shows scatter points colored by label value (0, 1, Missing)
+- Include n= counts in legend for each group
+- X-axis: Recording index (0 to ~149)
+- Y-axis: Feature value
+- Title: `{Feature_Name} by {Label_Name}`
+
+**Data Preparation (CRITICAL):**
+- Use `aggregate_and_add_labels()` to get ONE ROW per recording (not per window)
+- Include ALL 149 recordings in the aggregated DataFrame
+- Apply Recovery filter (currentConsciousness==0) ONLY in plotting code for Recovery subplot
+- Never filter during data aggregation phase
+
+This format has been requested multiple times and must be maintained in all future changes.
+
 ## Architecture
 
 ```
@@ -89,6 +120,100 @@ python features/run_features_layer.py
 - `data/clinical_labels.py` - Label loading and merging
 - `visualization/interactive.py` - ROC plots and confusion matrices
 - `features/run_features_layer.py` - Feature extraction + visualization (local file, untracked)
+
+## Reference Code: 3-Subplot Feature Comparison Plots
+
+**CRITICAL: Use this template for all feature comparison plots. DO NOT create single combined plots.**
+
+```python
+def plot_feature_by_labels(features_df, feature_name, label_columns, output_path):
+    """
+    Create 3-subplot feature comparison plot.
+
+    Args:
+        features_df: DataFrame with aggregated features (ONE ROW per recording)
+        feature_name: Name of feature column to plot
+        label_columns: List of 3 labels ['Recovery', 'currentConsciousness', 'Survival']
+        output_path: Where to save the plot
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Create 3 side-by-side subplots
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    # Define colors for each label value
+    colors = {
+        0: 'orange',    # Label value 0
+        1: 'blue',      # Label value 1
+        'missing': 'gray'  # Missing labels
+    }
+
+    for idx, (label_col, ax) in enumerate(zip(label_columns, axes)):
+        # Filter data for Recovery subplot only
+        if label_col == 'Recovery':
+            # Recovery only applies to patients with currentConsciousness==0
+            plot_data = features_df[features_df['currentConsciousness'] == 0].copy()
+        else:
+            # All other labels: include all recordings
+            plot_data = features_df.copy()
+
+        # Get feature values
+        feature_values = plot_data[feature_name].values
+        label_values = plot_data[label_col].values
+
+        # Create recording indices
+        x_indices = np.arange(len(plot_data))
+
+        # Separate by label value
+        mask_0 = (label_values == 0)
+        mask_1 = (label_values == 1)
+        mask_missing = pd.isna(label_values)
+
+        # Count for legend
+        n_0 = mask_0.sum()
+        n_1 = mask_1.sum()
+        n_missing = mask_missing.sum()
+
+        # Plot each group
+        ax.scatter(x_indices[mask_0], feature_values[mask_0],
+                   c=colors[0], label=f'{label_col}=0 (n={n_0})', alpha=0.6)
+        ax.scatter(x_indices[mask_1], feature_values[mask_1],
+                   c=colors[1], label=f'{label_col}=1 (n={n_1})', alpha=0.6)
+        if n_missing > 0:
+            ax.scatter(x_indices[mask_missing], feature_values[mask_missing],
+                       c=colors['missing'], label=f'Missing (n={n_missing})', alpha=0.3)
+
+        # Labels and styling
+        ax.set_xlabel('Recording Index')
+        ax.set_ylabel(feature_name)
+        ax.set_title(f'{feature_name} by {label_col}')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+```
+
+**Usage in run_features_layer.py:**
+
+```python
+# 1. Aggregate features (ONE ROW per recording)
+features_df = labels.aggregate_and_add_labels(
+    features_df,
+    label_columns=['Recovery', 'currentConsciousness', 'Survival'],
+    subject_id_column='SubjectID',  # or 'Name'
+    aggregation='mean'
+)
+
+# 2. Plot each feature
+for feature_name in feature_list:
+    output_path = output_dir / f'{feature_name}_comparison.png'
+    plot_feature_by_labels(features_df, feature_name,
+                          ['Recovery', 'currentConsciousness', 'Survival'],
+                          output_path)
+```
 
 ## Development Workflow
 
