@@ -28,12 +28,25 @@ pipeline/          - Main orchestration (main.py)
 **Branch:** `claude/add-roc-comparison-plots-pHWPk`
 
 **Recent Fixes:**
-1. ✅ Fixed inflated recording counts in feature comparison plots
+1. ✅ Removed incorrect filter_recovery logic that was losing recordings
+   - Issue: Only 131 recordings instead of expected 149 in plots
+   - Root Cause: `filter_recovery=True` filtered labels BEFORE merging, losing 18 recordings
+   - Solution: Removed filter_recovery parameter from `add_labels_to_features()` and `aggregate_and_add_labels()`
+   - Impact: All recordings now included; filtering should be done in visualization layer
+   - Files: `data/clinical_labels.py`
+   - Note: For Recovery plots, filter by `currentConsciousness==0` in plotting code, not data prep
+
+2. ✅ Added diagnostic logging to track data flow
+   - Shows: input rows/windows, unique SubjectIDs, aggregated rows, label counts
+   - Helps identify where recordings are being lost
+   - Files: `data/clinical_labels.py` (aggregate_and_add_labels method)
+
+3. ✅ Fixed inflated recording counts in feature comparison plots
    - Issue: Plots showing 755 recordings instead of 149 (window-level data, not recording-level)
    - Root Cause: Features DataFrame has multiple rows per recording (one per time window)
    - Solution: Added `aggregate_and_add_labels()` method to group by SubjectID and aggregate features
    - Impact: Plots now show correct n= counts (one point per recording, not per window)
-   - Files: `data/clinical_labels.py` (lines 478-554)
+   - Files: `data/clinical_labels.py` (lines 478-570)
    - Usage: Replace `add_labels_to_features()` with `aggregate_and_add_labels()` in visualization scripts
 
 2. ✅ Fixed missing labels in feature comparison plots

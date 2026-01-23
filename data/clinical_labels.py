@@ -411,7 +411,6 @@ class ClinicalLabels:
         features_df: pd.DataFrame,
         label_columns: List[str],
         on: str = 'SubjectID',
-        filter_recovery: bool = False,
         debug: bool = False
     ) -> pd.DataFrame:
         """
@@ -421,11 +420,14 @@ class ClinicalLabels:
         this method is for visualization - it adds label columns but keeps ALL recordings,
         marking missing labels as NaN so they appear as "Missing" in plots.
 
+        IMPORTANT: This method does NOT filter data. If you need to filter by label values
+        (e.g., show only currentConsciousness==0 for Recovery plots), do this in your
+        visualization code AFTER calling this method.
+
         Args:
             features_df: DataFrame with features (must have subject ID column)
             label_columns: List of label column names to add
             on: Column name to merge on
-            filter_recovery: If True, exclude recordings with Recovery != 1 (legacy parameter)
             debug: If True, print detailed merge information (deprecated - kept for compatibility)
 
         Returns:
@@ -446,10 +448,6 @@ class ClinicalLabels:
         # Select subject ID + requested label columns
         merge_columns = [self.subject_id_column] + available_labels
         labels_subset = labels_temp[merge_columns]
-
-        # Optional: Filter out recordings with Recovery != 1
-        if filter_recovery and 'Recovery' in available_labels:
-            labels_subset = labels_subset[labels_subset['Recovery'] == 1].copy()
 
         # Normalize SubjectIDs to handle whitespace and case differences
         # Create temporary normalized columns for merging
@@ -480,8 +478,7 @@ class ClinicalLabels:
         features_df: pd.DataFrame,
         label_columns: List[str],
         subject_id_column: str = 'SubjectID',
-        aggregation: str = 'mean',
-        filter_recovery: bool = False
+        aggregation: str = 'mean'
     ) -> pd.DataFrame:
         """
         Aggregate window-level features by SubjectID, then add labels.
@@ -490,12 +487,15 @@ class ClinicalLabels:
         per recording, not per window. It groups features by SubjectID and aggregates
         numeric columns using the specified function (mean, median, etc.).
 
+        IMPORTANT: This method adds ALL labels without filtering. If you need to filter
+        by label values (e.g., show only currentConsciousness==0 for Recovery plots),
+        do this in your visualization code AFTER calling this method.
+
         Args:
             features_df: DataFrame with window-level features (multiple rows per SubjectID)
             label_columns: List of label column names to add
             subject_id_column: Name of the SubjectID column (default: 'SubjectID')
             aggregation: Aggregation method - 'mean', 'median', 'first', 'last' (default: 'mean')
-            filter_recovery: If True, only include recordings where currentConsciousness == 0
 
         Returns:
             DataFrame with one row per SubjectID, aggregated features, and labels
@@ -511,6 +511,13 @@ class ClinicalLabels:
         """
         if subject_id_column not in features_df.columns:
             raise KeyError(f"SubjectID column '{subject_id_column}' not found in features DataFrame")
+
+        # Print diagnostic info
+        n_rows_before = len(features_df)
+        n_unique_subjects = features_df[subject_id_column].nunique()
+        print(f"\n[aggregate_and_add_labels] Input features:")
+        print(f"  - Total rows (windows): {n_rows_before}")
+        print(f"  - Unique SubjectIDs: {n_unique_subjects}")
 
         # Identify numeric vs non-numeric columns (excluding SubjectID)
         numeric_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
@@ -542,14 +549,26 @@ class ClinicalLabels:
         # Group by SubjectID and aggregate
         aggregated_df = features_df.groupby(subject_id_column, as_index=False).agg(agg_dict)
 
-        # Now add labels using the existing method
+        print(f"\n[aggregate_and_add_labels] After aggregation:")
+        print(f"  - Total rows (recordings): {len(aggregated_df)}")
+        print(f"  - Aggregation method: {aggregation}")
+
+        # Now add labels using the existing method (no filtering - keep all recordings)
         result_df = self.add_labels_to_features(
             aggregated_df,
             label_columns,
             on=subject_id_column,
-            filter_recovery=filter_recovery,
             debug=False
         )
+
+        print(f"\n[aggregate_and_add_labels] After adding labels:")
+        print(f"  - Total rows: {len(result_df)}")
+        for label_col in label_columns:
+            if label_col in result_df.columns:
+                n_valid = result_df[label_col].notna().sum()
+                n_missing = result_df[label_col].isna().sum()
+                print(f"  - {label_col}: {n_valid} valid, {n_missing} missing")
+        print()
 
         return result_df
 
