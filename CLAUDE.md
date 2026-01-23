@@ -200,20 +200,176 @@ def plot_feature_by_labels(features_df, feature_name, label_columns, output_path
 
 ```python
 # 1. Aggregate features (ONE ROW per recording)
+# CORRECT - No filter_recovery parameter
 features_df = labels.aggregate_and_add_labels(
     features_df,
     label_columns=['Recovery', 'currentConsciousness', 'Survival'],
-    subject_id_column='SubjectID',  # or 'Name'
+    subject_id_column='Name',  # Use 'Name' based on config.yaml
     aggregation='mean'
 )
 
-# 2. Plot each feature
+# 2. Plot each feature with 3-subplot layout
 for feature_name in feature_list:
     output_path = output_dir / f'{feature_name}_comparison.png'
     plot_feature_by_labels(features_df, feature_name,
                           ['Recovery', 'currentConsciousness', 'Survival'],
                           output_path)
 ```
+
+## Common Errors and Fixes
+
+### ❌ ERROR 1: `TypeError: got an unexpected keyword argument 'filter_recovery'`
+
+**Wrong code:**
+```python
+features_df = labels.aggregate_and_add_labels(
+    features_df,
+    label_columns,
+    subject_id_column='Name',
+    aggregation='mean',
+    filter_recovery=True  # ← REMOVED IN LATEST VERSION
+)
+```
+
+**Correct code:**
+```python
+features_df = labels.aggregate_and_add_labels(
+    features_df,
+    label_columns=['Recovery', 'currentConsciousness', 'Survival'],
+    subject_id_column='Name',
+    aggregation='mean'
+)
+# Do filtering in plotting code, not data preparation
+```
+
+### ❌ ERROR 2: Single combined plot instead of 3 subplots
+
+**Wrong:** Using `plot_feature_comparison()` or similar that creates one plot
+
+**Correct:** Always use `plot_feature_by_labels()` which creates 3 subplots:
+```python
+# This function MUST create 3 subplots using:
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+```
+
+### ❌ ERROR 3: Wrong number of recordings (131 instead of 149)
+
+**Cause:** Filtering happens during data preparation instead of visualization
+
+**Fix:**
+- Remove any `filter_recovery=True` calls
+- ALL 149 recordings must be in the aggregated DataFrame
+- Filter by `currentConsciousness==0` ONLY in plotting code for Recovery subplot
+
+## Complete Working Example for run_features_layer.py
+
+```python
+from pathlib import Path
+from data.clinical_labels import ClinicalLabels
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Load clinical labels
+labels = ClinicalLabels.from_excel(
+    labels_file='path/to/respiratory_analysis_all_subjects.xlsx',
+    subject_id_column='Name'  # Use 'Name' per config.yaml
+)
+
+# Load features (window-level data)
+features_df = pd.read_csv('path/to/features.csv')
+# features_df has ~755 rows (multiple windows per recording)
+
+# Aggregate to recording level and add labels
+features_df = labels.aggregate_and_add_labels(
+    features_df,
+    label_columns=['Recovery', 'currentConsciousness', 'Survival'],
+    subject_id_column='Name',
+    aggregation='mean'
+)
+# features_df now has ~149 rows (one per recording) with labels
+
+# Define 3-subplot plotting function
+def plot_feature_by_labels(features_df, feature_name, label_columns, output_path):
+    """Create 3-subplot feature comparison plot."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    colors = {0: 'orange', 1: 'blue', 'missing': 'gray'}
+
+    for idx, (label_col, ax) in enumerate(zip(label_columns, axes)):
+        # Filter Recovery subplot only
+        if label_col == 'Recovery':
+            plot_data = features_df[features_df['currentConsciousness'] == 0].copy()
+        else:
+            plot_data = features_df.copy()
+
+        feature_values = plot_data[feature_name].values
+        label_values = plot_data[label_col].values
+        x_indices = np.arange(len(plot_data))
+
+        mask_0 = (label_values == 0)
+        mask_1 = (label_values == 1)
+        mask_missing = pd.isna(label_values)
+
+        n_0, n_1, n_missing = mask_0.sum(), mask_1.sum(), mask_missing.sum()
+
+        ax.scatter(x_indices[mask_0], feature_values[mask_0],
+                   c=colors[0], label=f'{label_col}=0 (n={n_0})', alpha=0.6, s=30)
+        ax.scatter(x_indices[mask_1], feature_values[mask_1],
+                   c=colors[1], label=f'{label_col}=1 (n={n_1})', alpha=0.6, s=30)
+        if n_missing > 0:
+            ax.scatter(x_indices[mask_missing], feature_values[mask_missing],
+                       c=colors['missing'], label=f'Missing (n={n_missing})', alpha=0.3, s=30)
+
+        ax.set_xlabel('Recording Index')
+        ax.set_ylabel(feature_name)
+        ax.set_title(f'{feature_name} by {label_col}')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+# Plot each feature
+output_dir = Path('outputs')
+output_dir.mkdir(exist_ok=True)
+
+feature_list = ['BreathingRate_mean', 'Duty_Cycle_inhale_mean', ...]  # Your features
+for feature_name in feature_list:
+    output_path = output_dir / f'{feature_name}_comparison.png'
+    plot_feature_by_labels(
+        features_df,
+        feature_name,
+        ['Recovery', 'currentConsciousness', 'Survival'],
+        output_path
+    )
+```
+
+**Expected Output:**
+```
+[aggregate_and_add_labels] Input features:
+  - Total rows (windows): 755
+  - Unique SubjectIDs: 149
+
+[aggregate_and_add_labels] After aggregation:
+  - Total rows (recordings): 149
+  - Aggregation method: mean
+
+[aggregate_and_add_labels] After adding labels:
+  - Total rows: 149
+  - Recovery: 131 valid, 18 missing
+  - currentConsciousness: 149 valid, 0 missing
+  - Survival: 141 valid, 8 missing
+```
+
+Each plot will have:
+- **3 subplots** (Recovery | currentConsciousness | Survival)
+- **Correct counts** (~149 total across all subplots)
+- **Recovery filtered** to show only currentConsciousness==0
 
 ## Development Workflow
 
