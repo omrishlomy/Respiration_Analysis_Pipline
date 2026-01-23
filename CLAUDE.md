@@ -28,18 +28,26 @@ pipeline/          - Main orchestration (main.py)
 **Branch:** `claude/add-roc-comparison-plots-pHWPk`
 
 **Recent Fixes:**
-1. ✅ Fixed missing labels in feature comparison plots
+1. ✅ Fixed inflated recording counts in feature comparison plots
+   - Issue: Plots showing 755 recordings instead of 149 (window-level data, not recording-level)
+   - Root Cause: Features DataFrame has multiple rows per recording (one per time window)
+   - Solution: Added `aggregate_and_add_labels()` method to group by SubjectID and aggregate features
+   - Impact: Plots now show correct n= counts (one point per recording, not per window)
+   - Files: `data/clinical_labels.py` (lines 478-554)
+   - Usage: Replace `add_labels_to_features()` with `aggregate_and_add_labels()` in visualization scripts
+
+2. ✅ Fixed missing labels in feature comparison plots
    - Issue: SubjectID mismatch due to trailing spaces in Excel file (`'ABOU '` vs `'ABOU'`)
    - Solution: Added SubjectID normalization (strip whitespace, uppercase) in `add_labels_to_features()`
    - Impact: All labels now merge correctly regardless of whitespace or case differences
    - Files: `data/clinical_labels.py` (lines 454-474)
 
-2. ✅ Fixed ROC comparison plots not being created
+3. ✅ Fixed ROC comparison plots not being created
    - Issue: `run_experiments()` returned empty predictions dict
    - Solution: Collect predictions from LORO, LOSO, and incremental feature experiments
    - Files: `models/experiment.py`, `visualization/interactive.py`
 
-3. ✅ Fixed feature comparison plots not regenerating (Commit: 7b33348)
+4. ✅ Fixed feature comparison plots not regenerating (Commit: 7b33348)
    - Issue: `merge_with_features()` expected single outcome (string), but script passed list
    - Solution: Added `add_labels_to_features()` method for visualization pipelines
    - Files: `data/clinical_labels.py`

@@ -475,6 +475,84 @@ class ClinicalLabels:
 
         return merged
 
+    def aggregate_and_add_labels(
+        self,
+        features_df: pd.DataFrame,
+        label_columns: List[str],
+        subject_id_column: str = 'SubjectID',
+        aggregation: str = 'mean',
+        filter_recovery: bool = False
+    ) -> pd.DataFrame:
+        """
+        Aggregate window-level features by SubjectID, then add labels.
+
+        This method is specifically for visualization where you want one data point
+        per recording, not per window. It groups features by SubjectID and aggregates
+        numeric columns using the specified function (mean, median, etc.).
+
+        Args:
+            features_df: DataFrame with window-level features (multiple rows per SubjectID)
+            label_columns: List of label column names to add
+            subject_id_column: Name of the SubjectID column (default: 'SubjectID')
+            aggregation: Aggregation method - 'mean', 'median', 'first', 'last' (default: 'mean')
+            filter_recovery: If True, only include recordings where currentConsciousness == 0
+
+        Returns:
+            DataFrame with one row per SubjectID, aggregated features, and labels
+
+        Example:
+            # If features_df has 755 rows (multiple windows per recording)
+            # This will return ~149 rows (one per recording)
+            agg_df = labels.aggregate_and_add_labels(
+                features_df,
+                ['Recovery', 'currentConsciousness', 'Survival'],
+                aggregation='mean'
+            )
+        """
+        if subject_id_column not in features_df.columns:
+            raise KeyError(f"SubjectID column '{subject_id_column}' not found in features DataFrame")
+
+        # Identify numeric vs non-numeric columns (excluding SubjectID)
+        numeric_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
+        non_numeric_cols = [col for col in features_df.columns if col not in numeric_cols and col != subject_id_column]
+
+        # Build aggregation dict
+        agg_dict = {}
+
+        # Aggregate numeric columns
+        if aggregation == 'mean':
+            for col in numeric_cols:
+                agg_dict[col] = 'mean'
+        elif aggregation == 'median':
+            for col in numeric_cols:
+                agg_dict[col] = 'median'
+        elif aggregation == 'first':
+            for col in numeric_cols:
+                agg_dict[col] = 'first'
+        elif aggregation == 'last':
+            for col in numeric_cols:
+                agg_dict[col] = 'last'
+        else:
+            raise ValueError(f"Unknown aggregation method: {aggregation}. Use 'mean', 'median', 'first', or 'last'")
+
+        # Keep first value of non-numeric columns (e.g., RecordingDate)
+        for col in non_numeric_cols:
+            agg_dict[col] = 'first'
+
+        # Group by SubjectID and aggregate
+        aggregated_df = features_df.groupby(subject_id_column, as_index=False).agg(agg_dict)
+
+        # Now add labels using the existing method
+        result_df = self.add_labels_to_features(
+            aggregated_df,
+            label_columns,
+            on=subject_id_column,
+            filter_recovery=filter_recovery,
+            debug=False
+        )
+
+        return result_df
+
     def to_excel(
         self,
         filepath: str,
