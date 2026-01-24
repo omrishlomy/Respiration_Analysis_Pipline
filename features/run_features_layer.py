@@ -389,11 +389,35 @@ def main():
             print(f"  Label columns: {label_columns}")
 
             # Merge labels with features using clinical_labels module
+            # CRITICAL: Use 'Name' to match the SubjectID column in features
+            # The features DataFrame uses 'SubjectID' column, but we need to tell
+            # aggregate_and_add_labels to look for 'Name' in the features
+            # Wait - actually the features have 'SubjectID' so we match that
+            # But the column in features is called 'SubjectID', not 'Name'
+            # Let me check what column features actually has...
+            print(f"  Features columns: {list(features_df.columns[:15])}")
+            print(f"  Looking for subject ID column in features...")
+
+            # Try to find the subject ID column
+            if 'SubjectID' in features_df.columns:
+                features_subject_col = 'SubjectID'
+            elif 'Name' in features_df.columns:
+                features_subject_col = 'Name'
+            elif subject_column in features_df.columns:
+                features_subject_col = subject_column
+            else:
+                print(f"  ERROR: Could not find subject ID column in features!")
+                print(f"  Available columns: {list(features_df.columns)}")
+                raise ValueError("No subject ID column found in features DataFrame")
+
+            print(f"  Using features column: '{features_subject_col}'")
+            print(f"  Sample values: {features_df[features_subject_col].head(3).tolist()}")
+
             # CORRECT - No filter_recovery parameter
             features_df = labels.aggregate_and_add_labels(
                 features_df,
                 label_columns=['Recovery', 'currentConsciousness', 'Survival'],
-                subject_id_column='SubjectID',
+                subject_id_column=features_subject_col,
                 aggregation='mean'
             )
 
