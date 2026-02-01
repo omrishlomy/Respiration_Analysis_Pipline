@@ -90,6 +90,86 @@ except ImportError:
 DEBUG = False
 
 
+def plot_signal_3subplots(rec, cleaned_data, inhale_idx, exhale_idx, multipeak_idx, output_path, window_size=300):
+    """
+    Create 3-subplot signal visualization.
+
+    CRITICAL REQUIREMENT: This function MUST create 3 subplots showing:
+    1. Full raw signal (entire recording)
+    2. 5-minute window of raw signal
+    3. Same 5-minute window cleaned with peaks detected
+
+    Args:
+        rec: RespiratoryRecording object with raw data
+        cleaned_data: Cleaned signal data
+        inhale_idx: Indices of inhale peaks
+        exhale_idx: Indices of exhale peaks
+        multipeak_idx: Indices of multi-peak breaths
+        output_path: Where to save the plot
+        window_size: Window size in seconds (default 300 = 5 minutes)
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    fig, axes = plt.subplots(1, 3, figsize=(20, 5))
+
+    # Calculate time arrays
+    time_full = np.arange(len(rec.data)) / rec.sampling_rate
+    time_cleaned = np.arange(len(cleaned_data)) / rec.sampling_rate
+
+    # Determine window for subplots 2 and 3 (first 5 minutes or available data)
+    window_samples = int(window_size * rec.sampling_rate)
+    window_end = min(window_samples, len(rec.data))
+
+    # Subplot 1: Full raw signal
+    ax1 = axes[0]
+    ax1.plot(time_full, rec.data, 'b-', linewidth=0.5, alpha=0.7)
+    ax1.set_xlabel('Time (s)', fontsize=10)
+    ax1.set_ylabel('Amplitude', fontsize=10)
+    ax1.set_title(f'Full Raw Signal\n{rec.subject_id}_{rec.recording_date}\nDuration: {rec.duration/60:.1f} min',
+                  fontsize=11, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+
+    # Subplot 2: 5-minute window of raw signal
+    ax2 = axes[1]
+    ax2.plot(time_full[:window_end], rec.data[:window_end], 'b-', linewidth=0.8)
+    ax2.set_xlabel('Time (s)', fontsize=10)
+    ax2.set_ylabel('Amplitude', fontsize=10)
+    ax2.set_title(f'Raw Signal - First {window_size}s Window', fontsize=11, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+
+    # Subplot 3: Same window cleaned with peaks
+    ax3 = axes[2]
+    window_end_cleaned = min(window_samples, len(cleaned_data))
+    ax3.plot(time_cleaned[:window_end_cleaned], cleaned_data[:window_end_cleaned],
+             'k-', linewidth=0.8, label='Cleaned Signal')
+
+    # Plot peaks within the window
+    inhale_in_window = inhale_idx[inhale_idx < window_end_cleaned]
+    exhale_in_window = exhale_idx[exhale_idx < window_end_cleaned]
+    multipeak_in_window = multipeak_idx[multipeak_idx < window_end_cleaned]
+
+    if len(inhale_in_window) > 0:
+        ax3.scatter(time_cleaned[inhale_in_window], cleaned_data[inhale_in_window],
+                   c='red', s=50, marker='^', label=f'Inhale ({len(inhale_in_window)})', zorder=5)
+    if len(exhale_in_window) > 0:
+        ax3.scatter(time_cleaned[exhale_in_window], cleaned_data[exhale_in_window],
+                   c='blue', s=50, marker='v', label=f'Exhale ({len(exhale_in_window)})', zorder=5)
+    if len(multipeak_in_window) > 0:
+        ax3.scatter(time_cleaned[multipeak_in_window], cleaned_data[multipeak_in_window],
+                   c='orange', s=80, marker='*', label=f'Multi-peak ({len(multipeak_in_window)})', zorder=5)
+
+    ax3.set_xlabel('Time (s)', fontsize=10)
+    ax3.set_ylabel('Amplitude', fontsize=10)
+    ax3.set_title(f'Cleaned Signal with Peaks - First {window_size}s', fontsize=11, fontweight='bold')
+    ax3.legend(fontsize=9, loc='upper right')
+    ax3.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
 def plot_feature_by_labels(features_df, feature_name, label_columns, output_path):
     """
     Create 3-subplot feature comparison plot.
@@ -322,9 +402,9 @@ def main():
             all_recording_features.append(agg_features)
             all_window_features[rec_id] = window_features
 
-            # Generate plots using visualizations module
+            # Generate 3-subplot signal plots (raw full, raw window, cleaned window with peaks)
             peaks_path = peaks_dir / f"{i:03d}_{rec_id}.png"
-            plot_signal_with_peaks(rec, cleaned_data, inhale_idx, exhale_idx, multipeak_idx, peaks_path)
+            plot_signal_3subplots(rec, cleaned_data, inhale_idx, exhale_idx, multipeak_idx, peaks_path)
 
             if len(window_features) > 0:
                 matrix_path = matrix_dir / f"{i:03d}_{rec_id}.png"
@@ -413,12 +493,13 @@ def main():
             print(f"  Using features column: '{features_subject_col}'")
             print(f"  Sample values: {features_df[features_subject_col].head(3).tolist()}")
 
-            # CORRECT - No filter_recovery parameter
-            features_df = labels.aggregate_and_add_labels(
+            # CRITICAL: Features are already aggregated per recording (149 rows)
+            # Do NOT use aggregate_and_add_labels - it will aggregate again by SubjectID
+            # Use add_labels_to_features to add labels WITHOUT further aggregation
+            features_df = labels.add_labels_to_features(
                 features_df,
                 label_columns=['Recovery', 'currentConsciousness', 'Survival'],
-                subject_id_column=features_subject_col,
-                aggregation='mean'
+                on=features_subject_col
             )
 
             # Save updated CSV with labels

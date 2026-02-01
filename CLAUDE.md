@@ -42,6 +42,33 @@ For EACH feature being plotted, create exactly 3 subplots showing:
 
 This format has been requested multiple times and must be maintained in all future changes.
 
+**Signal Plot Format (MUST ALWAYS BE 3 SUBPLOTS):**
+
+⚠️ **NEVER create single signal plots. ALWAYS create 3 side-by-side subplots.**
+
+For EACH recording's signal plot, create exactly 3 subplots showing:
+1. **Left subplot**: Full raw signal (entire recording)
+   - Plot the complete unprocessed respiratory signal
+   - Title: "Full Raw Signal" with subject ID, date, and duration
+2. **Middle subplot**: 5-minute window of raw signal
+   - Show first 5 minutes (or available duration if shorter)
+   - Unprocessed signal, no peak detection
+   - Title: "Raw Signal - First 300s Window"
+3. **Right subplot**: Same 5-minute window cleaned with peaks detected
+   - Show cleaned signal from breathing parameter algorithm
+   - Overlay inhale peaks (red triangles), exhale peaks (blue inverted triangles), multi-peaks (orange stars)
+   - Include counts in legend: "Inhale (n=X)", "Exhale (n=Y)", "Multi-peak (n=Z)"
+   - Title: "Cleaned Signal with Peaks - First 300s"
+
+**Plot Layout:**
+- Use matplotlib's `fig, axes = plt.subplots(1, 3, figsize=(20, 5))`
+- All subplots share same y-axis scale for comparison
+- X-axis: Time in seconds
+- Y-axis: Amplitude
+- Grid enabled for all subplots
+
+This format has been requested explicitly and must be maintained in all future changes.
+
 ## Architecture
 
 ```
