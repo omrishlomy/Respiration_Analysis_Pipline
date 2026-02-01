@@ -145,9 +145,14 @@ def plot_signal_3subplots(rec, cleaned_data, inhale_idx, exhale_idx, multipeak_i
              'k-', linewidth=0.8, label='Cleaned Signal')
 
     # Plot peaks within the window
-    inhale_in_window = inhale_idx[inhale_idx < window_end_cleaned]
-    exhale_in_window = exhale_idx[exhale_idx < window_end_cleaned]
-    multipeak_in_window = multipeak_idx[multipeak_idx < window_end_cleaned]
+    # Convert to numpy arrays if they're lists
+    inhale_idx_arr = np.array(inhale_idx) if isinstance(inhale_idx, list) else inhale_idx
+    exhale_idx_arr = np.array(exhale_idx) if isinstance(exhale_idx, list) else exhale_idx
+    multipeak_idx_arr = np.array(multipeak_idx) if isinstance(multipeak_idx, list) else multipeak_idx
+
+    inhale_in_window = inhale_idx_arr[inhale_idx_arr < window_end_cleaned]
+    exhale_in_window = exhale_idx_arr[exhale_idx_arr < window_end_cleaned]
+    multipeak_in_window = multipeak_idx_arr[multipeak_idx_arr < window_end_cleaned]
 
     if len(inhale_in_window) > 0:
         ax3.scatter(time_cleaned[inhale_in_window], cleaned_data[inhale_in_window],
